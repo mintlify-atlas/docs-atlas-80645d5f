@@ -1,0 +1,357 @@
+---
+title: Airtable Integration
+description: Configure Airtable API and base setup for VA profile distribution
+---
+
+## Overview
+
+The Click Creators Scraper Client uses Airtable to distribute scraped Instagram profiles to Virtual Assistants (VAs). Each VA gets a dedicated table with assigned profiles for outreach campaigns.
+
+## Prerequisites
+
+- An Airtable account ([sign up here](https://airtable.com))
+- A workspace where you can create bases
+- Basic understanding of Airtable tables and records
+
+## Step 1: Create an Airtable Base
+
+1. Log in to [Airtable](https://airtable.com)
+2. Click **"Create a base"** or **"Add a base"**
+3. Choose **"Start from scratch"**
+4. Name your base (e.g., "Instagram VA Distribution - [Influencer Name]")
+5. The base will open with a default table
+
+<Info>
+  In the multi-tenant architecture, you can create separate bases for different influencer campaigns. Each base is isolated by its `base_id`.
+</Info>
+
+## Step 2: Get Your Base ID
+
+The base ID is required for API integration and multi-tenant isolation.
+
+### Method 1: From Airtable URL
+
+1. Open your base in Airtable
+2. Look at the URL: `https://airtable.com/app1234567890/...`
+3. The base ID is the part starting with `app`: **`app1234567890`**
+
+### Method 2: From API Documentation
+
+1. Go to [Airtable API Docs](https://airtable.com/api)
+2. Select your base
+3. The base ID is shown at the top: **`app1234567890`**
+
+<CodeGroup>
+```bash Environment Variable
+# Backend .env
+AIRTABLE_BASE_ID=app1234567890
+```
+
+```typescript In Application
+// When creating a scraping job, the base_id is stored
+const job = await createScrapingJob({
+  influencer_name: 'Example Influencer',
+  platform: 'instagram',
+  airtable_base_id: 'app1234567890', // This becomes base_id
+  num_vas: 80
+})
+```
+</CodeGroup>
+
+## Step 3: Generate API Key
+
+Airtable requires authentication via API key or Personal Access Token.
+
+### Option A: Personal Access Token (Recommended)
+
+1. Go to [Airtable Account Settings](https://airtable.com/account)
+2. Click **"Developer hub"** → **"Personal access tokens"**
+3. Click **"Create new token"**
+4. Configure token:
+   - **Name:** "Click Creators Scraper API"
+   - **Scopes:** Select:
+     - `data.records:read`
+     - `data.records:write`
+     - `schema.bases:read`
+     - `schema.bases:write`
+   - **Access:** Choose your workspace
+5. Click **"Create token"**
+6. Copy the token immediately (you won't see it again)
+
+### Option B: API Key (Legacy)
+
+<Warning>
+  API Keys are deprecated by Airtable. Use Personal Access Tokens instead.
+</Warning>
+
+1. Go to [Airtable Account](https://airtable.com/account)
+2. Scroll to **"API"** section
+3. Click **"Generate API key"**
+4. Copy your API key
+
+<CodeGroup>
+```bash Environment Variable
+# Backend .env
+AIRTABLE_API_KEY=keyXXXXXXXXXXXXXX
+# or
+AIRTABLE_API_KEY=patXXXXXXXXXXXXXX.XXXXXXXXXXXXXXXX
+```
+</CodeGroup>
+
+## Step 4: Configure VA Tables
+
+The application distributes profiles across **80 VA tables** (configurable via `NEXT_PUBLIC_NUM_VA_TABLES`).
+
+### Table Structure
+
+Each VA table should have the following fields:
+
+| Field Name | Type | Description |
+|------------|------|-------------|
+| **Position** | Number | Order position (1-180) |
+| **ID** | Single line text | Instagram user ID |
+| **Username** | Single line text | Instagram username |
+| **Full Name** | Single line text | User's full name |
+| **Status** | Single select | `pending`, `followed`, `unfollow`, `completed` |
+| **Assigned Date** | Date | When profile was assigned |
+
+### Automated Table Creation
+
+The backend API can automatically create tables when syncing:
+
+<CodeGroup>
+```python Backend API (Conceptual)
+# POST /api/airtable-sync/{campaign_id}
+# Automatically creates tables if they don't exist
+
+for table_num in range(1, 81):  # Tables 1-80
+    table_name = f"Table {table_num}"
+    
+    # Create table if not exists
+    if not table_exists(table_name):
+        create_table(table_name, fields=[
+            {"name": "Position", "type": "number"},
+            {"name": "ID", "type": "singleLineText"},
+            {"name": "Username", "type": "singleLineText"},
+            {"name": "Full Name", "type": "singleLineText"},
+            {"name": "Status", "type": "singleSelect", "options": [
+                "pending", "followed", "unfollow", "completed"
+            ]},
+            {"name": "Assigned Date", "type": "date"}
+        ])
+```
+</CodeGroup>
+
+### Manual Table Creation
+
+1. In your Airtable base, click **"+ Add or import"**
+2. Choose **"Create empty table"**
+3. Name it **"Table 1"**
+4. Add the fields listed above
+5. Repeat for Tables 2-80 (or use duplication feature)
+
+<Note>
+  You can start with fewer tables during testing. The application will only sync to existing tables.
+</Note>
+
+## Step 5: Link Base to Scraping Job
+
+When creating a scraping job in the application, you'll be prompted to provide the Airtable base URL:
+
+1. Navigate to `/configure` in the application
+2. Fill out the job form:
+   - **Influencer Name:** The influencer's name
+   - **Platform:** instagram/threads/tiktok/x
+   - **Number of VAs:** 80 (default)
+3. Click **"Create Job"**
+4. A dialog appears: **"Link Airtable Base"**
+5. Paste your Airtable base URL: `https://airtable.com/app1234567890/...`
+6. The `base_id` is extracted and saved to the `scraping_jobs` table
+
+<CodeGroup>
+```typescript Airtable Link Dialog
+// components/airtable-link-dialog.tsx
+const extractBaseId = (url: string): string | null => {
+  const match = url.match(/app[a-zA-Z0-9]{14}/)
+  return match ? match[0] : null
+}
+
+// User pastes: https://airtable.com/app1234567890/tblXXXXX/viwXXXXX
+// Extracted: app1234567890
+```
+</CodeGroup>
+
+## Step 6: Test Airtable Sync
+
+### From the Application
+
+1. Create a scraping job with Airtable base linked
+2. Run **"Find Accounts"** to scrape profiles
+3. Click **"Assign to VAs"** button
+4. The workflow will:
+   - Create a campaign (0-33%)
+   - Distribute profiles to VA tables (33-66%)
+   - Sync to Airtable (66-100%)
+
+### Verify in Airtable
+
+1. Open your Airtable base
+2. Check **"Table 1"** through **"Table 80"**
+3. Each table should have **180 records** (configurable via `NEXT_PUBLIC_PROFILES_PER_TABLE`)
+4. Total records: **14,400** (80 × 180)
+
+### Expected Record Structure
+
+| Position | ID | Username | Full Name | Status | Assigned Date |
+|----------|-----|----------|-----------|--------|---------------|
+| 1 | 12345678 | john_doe | John Doe | pending | 2025-10-23 |
+| 2 | 87654321 | jane_smith | Jane Smith | pending | 2025-10-23 |
+| ... | ... | ... | ... | ... | ... |
+| 180 | 11223344 | mike_jones | Mike Jones | pending | 2025-10-23 |
+
+## API Endpoints
+
+### POST /api/airtable-sync/{campaign_id}
+
+Syncs campaign profiles to Airtable VA tables.
+
+**Request Headers:**
+```bash
+X-Base-Id: app1234567890
+Content-Type: application/json
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "campaign_id": "uuid-here",
+  "tables_synced": 80,
+  "total_records": 14400
+}
+```
+
+## Configuration Options
+
+### Number of VA Tables
+
+<ParamField path="NEXT_PUBLIC_NUM_VA_TABLES" type="number" default="80">
+  Controls how many Airtable tables profiles are distributed across.
+  
+  **Example:** Set to `40` for 40 VAs instead of 80
+</ParamField>
+
+### Profiles Per Table
+
+<ParamField path="NEXT_PUBLIC_PROFILES_PER_TABLE" type="number" default="180">
+  Controls how many profiles each VA receives per campaign.
+  
+  **Daily target:** `NUM_VA_TABLES × PROFILES_PER_TABLE`
+  
+  **Example:** `80 × 180 = 14,400 profiles per day`
+</ParamField>
+
+## Multi-Tenant Architecture
+
+Each scraping job can have its own Airtable base:
+
+```typescript
+// Job 1: Influencer A - Instagram
+{
+  job_id: 'uuid-1',
+  influencer_name: 'Influencer A',
+  platform: 'instagram',
+  airtable_base_id: 'app1111111111111',
+  base_id: 'app1111111111111'
+}
+
+// Job 2: Influencer B - TikTok
+{
+  job_id: 'uuid-2',
+  influencer_name: 'Influencer B',
+  platform: 'tiktok',
+  airtable_base_id: 'app2222222222222',
+  base_id: 'app2222222222222'
+}
+```
+
+Each job syncs to its own base, ensuring complete data isolation.
+
+## Troubleshooting
+
+### "Airtable sync failed" Error
+
+**Possible causes:**
+
+1. **Invalid API Key**
+   - Verify `AIRTABLE_API_KEY` in `.env`
+   - Check token hasn't expired
+   - Ensure scopes include `data.records:write`
+
+2. **Incorrect Base ID**
+   - Verify `base_id` format: `appXXXXXXXXXXXXXX`
+   - Check base still exists in your workspace
+   - Ensure API key has access to this base
+
+3. **Tables Don't Exist**
+   - Create tables manually (Table 1 - Table 80)
+   - Or ensure backend auto-creates tables
+
+4. **Rate Limits**
+   - Airtable has a rate limit of **5 requests/second**
+   - Backend should implement delays between batch uploads
+   - Check Airtable API status page
+
+### "Profiles not appearing in Airtable"
+
+1. Check campaign status is `success` in `campaigns` table
+2. Verify `daily_assignments` table has records for the campaign
+3. Check backend logs for sync errors
+4. Manually test API with curl:
+
+<CodeGroup>
+```bash Test Airtable API
+curl -X POST https://api.airtable.com/v0/app1234567890/Table%201 \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "records": [
+      {
+        "fields": {
+          "Position": 1,
+          "Username": "test_user",
+          "Status": "pending"
+        }
+      }
+    ]
+  }'
+```
+</CodeGroup>
+
+### "Table not found" Error
+
+- Table names must match exactly: `Table 1`, `Table 2`, etc.
+- Check for extra spaces or special characters
+- Verify base ID is correct
+
+## Best Practices
+
+<Check>
+  - Use separate Airtable bases for different influencer campaigns
+  - Create backup bases before making structural changes
+  - Monitor Airtable API usage to avoid rate limits
+  - Use views in Airtable to filter by status (pending, completed, etc.)
+  - Set up Airtable automations for VA notifications
+</Check>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Apify Setup" icon="screwdriver-wrench" href="/configuration/apify-setup">
+    Configure Instagram scraping with Apify actors
+  </Card>
+  
+  <Card title="Campaign Workflow" icon="route" href="/features/campaign-management">
+    Learn how campaigns distribute profiles to VAs
+  </Card>
+</CardGroup>

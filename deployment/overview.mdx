@@ -1,0 +1,263 @@
+---
+title: 'Deployment Overview'
+description: 'Learn about deployment options and strategies for the Instagram Marketing Automation Platform'
+icon: 'rocket'
+---
+
+## Overview
+
+The Instagram Marketing Automation Platform is a Next.js 14 application designed for production deployment. This guide covers deployment options, requirements, and best practices.
+
+## Architecture Components
+
+The platform consists of two main components that need to be deployed:
+
+<CardGroup cols={2}>
+  <Card title="Frontend Client" icon="browser">
+    Next.js 14 application with App Router, TypeScript, and Tailwind CSS
+  </Card>
+  <Card title="Backend API" icon="server">
+    Flask API (Python 3.9+) for scraping, ingestion, and Airtable sync
+  </Card>
+</CardGroup>
+
+## Deployment Options
+
+### Recommended: Vercel (Frontend)
+
+Vercel is the recommended platform for deploying the Next.js frontend:
+
+- **Zero-config deployment** - Automatic build detection
+- **Edge network** - Global CDN for fast performance
+- **Serverless functions** - Scales automatically
+- **Environment variables** - Secure configuration management
+- **Preview deployments** - Automatic PR previews
+
+<Info>
+  Vercel is created by the Next.js team and provides the best integration with Next.js applications.
+</Info>
+
+### Backend Deployment Options
+
+The Flask backend can be deployed to:
+
+- **Railway** - Simple Python deployment with database support
+- **Render** - Free tier available for backend services
+- **AWS EC2** - Full control with manual configuration
+- **Google Cloud Run** - Containerized serverless deployment
+- **DigitalOcean App Platform** - Simple deployment with scaling
+
+## Tech Stack Requirements
+
+### Frontend Requirements
+
+```bash
+- Node.js 18+
+- npm or yarn
+- Next.js 14.2.33
+- TypeScript 5+
+```
+
+### Backend Requirements
+
+```bash
+- Python 3.9+
+- Flask
+- Supabase PostgreSQL database
+- Apify account (Instagram scraping)
+- Airtable account (VA workspace)
+```
+
+## Build Configuration
+
+The application uses a **standalone output** mode for optimized production builds:
+
+```javascript next.config.mjs
+const nextConfig = {
+  output: 'standalone',
+  images: {
+    unoptimized: true,
+  },
+};
+```
+
+<Warning>
+  The standalone output creates a self-contained build that includes only necessary files, reducing deployment size.
+</Warning>
+
+## Environment Variables
+
+### Production Environment Variables
+
+Both frontend and backend require environment variables for production:
+
+<AccordionGroup>
+  <Accordion title="Frontend Variables (.env.local)">
+    ```bash
+    # App URL (production domain)
+    NEXT_PUBLIC_APP_URL=https://your-domain.vercel.app
+    
+    # Backend API URL (production API)
+    NEXT_PUBLIC_API_URL=https://your-api-domain.com
+    
+    # Supabase Configuration
+    NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+    NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
+    
+    # Authentication Credentials
+    NEXT_PUBLIC_USERNAME=your-username
+    NEXT_PUBLIC_PASSWORD=your-password
+    NEXT_PUBLIC_OTP=123456
+    
+    # Campaign Configuration
+    NEXT_PUBLIC_DAILY_SELECTION_TARGET=14400
+    
+    # Source Profiles Management
+    NEXT_PUBLIC_DELETE_PASSWORD=delete123
+    ```
+  </Accordion>
+  
+  <Accordion title="Backend Variables (.env)">
+    ```bash
+    # Supabase
+    SUPABASE_URL=https://your-project.supabase.co
+    SUPABASE_KEY=your-service-role-key
+    
+    # Apify (Instagram Scraper)
+    APIFY_API_KEY=your-apify-key
+    APIFY_ACTOR_ID=your-actor-id
+    
+    # Airtable
+    AIRTABLE_API_KEY=your-airtable-key
+    AIRTABLE_BASE_ID=your-base-id
+    
+    # Gender Detection API (optional)
+    GENDER_API_KEY=your-gender-api-key
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Database Setup
+
+Ensure your Supabase database is production-ready:
+
+<Steps>
+  <Step title="Create Production Database">
+    Set up a Supabase project for production use (not the free tier for high-traffic apps)
+  </Step>
+  
+  <Step title="Run Database Migrations">
+    Execute all SQL schema files to create required tables:
+    - `source_profiles`
+    - `raw_scraped_profiles`
+    - `global_usernames`
+    - `campaigns`
+    - `daily_assignments`
+    - `scraping_jobs`
+  </Step>
+  
+  <Step title="Configure RLS Policies">
+    Enable Row Level Security policies for the anon role to access tables
+  </Step>
+  
+  <Step title="Test Connection">
+    Verify connection using the Supabase client with your production credentials
+  </Step>
+</Steps>
+
+## Performance Considerations
+
+### Build Optimization
+
+The build process includes automatic optimizations:
+
+- **Tree shaking** - Removes unused code
+- **Code splitting** - Splits bundles for faster loading
+- **Image optimization** - Disabled for standalone builds
+- **CSS minification** - Reduces stylesheet size
+- **JavaScript minification** - Compresses JS files
+
+### Caching Strategy
+
+```bash
+# Static assets are cached indefinitely
+/_next/static/* - Cache-Control: public, max-age=31536000, immutable
+
+# API routes have no cache by default
+/api/* - Cache-Control: no-cache, no-store, must-revalidate
+```
+
+## Monitoring and Logging
+
+### Analytics Integration
+
+The application includes Vercel Analytics:
+
+```typescript
+import { Analytics } from '@vercel/analytics';
+
+export default function RootLayout({ children }) {
+  return (
+    <html>
+      <body>
+        {children}
+        <Analytics />
+      </body>
+    </html>
+  );
+}
+```
+
+### Error Tracking
+
+Consider integrating error tracking services:
+
+- **Sentry** - Error monitoring and performance tracking
+- **LogRocket** - Session replay and debugging
+- **Datadog** - Full-stack observability
+
+## Scaling Considerations
+
+### Frontend Scaling
+
+- Vercel automatically scales based on traffic
+- Edge network distributes content globally
+- Serverless functions scale to zero when idle
+
+### Backend Scaling
+
+- Use load balancers for multiple Flask instances
+- Implement connection pooling for database
+- Configure rate limiting for API endpoints
+- Use Redis for caching frequently accessed data
+
+## Security Best Practices
+
+<CardGroup cols={2}>
+  <Card title="HTTPS Only" icon="lock">
+    Always use HTTPS in production. Vercel provides automatic SSL certificates.
+  </Card>
+  <Card title="Environment Variables" icon="key">
+    Never commit `.env` files. Use platform-provided secret management.
+  </Card>
+  <Card title="API Keys" icon="shield">
+    Rotate API keys regularly and use service role keys only on backend.
+  </Card>
+  <Card title="CORS Configuration" icon="globe">
+    Configure CORS to allow only your frontend domain.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Vercel Deployment" icon="rocket" href="/deployment/vercel">
+    Step-by-step guide to deploy on Vercel
+  </Card>
+  <Card title="Production Checklist" icon="list-check" href="/deployment/production-checklist">
+    Complete pre-deployment checklist
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/deployment/troubleshooting">
+    Common deployment issues and solutions
+  </Card>
+</CardGroup>

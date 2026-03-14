@@ -1,0 +1,264 @@
+---
+title: Environment Variables
+description: Complete reference for all environment variables in the Click Creators Scraper Client
+---
+
+## Overview
+
+The Click Creators Scraper Client uses environment variables for configuration across the frontend Next.js application and backend Flask API. This page documents all available environment variables.
+
+<Note>
+  Create a `.env.local` file in the project root for local development. Never commit this file to version control.
+</Note>
+
+## Frontend Environment Variables
+
+These variables are used by the Next.js application and must be prefixed with `NEXT_PUBLIC_` to be accessible in the browser.
+
+### Application URLs
+
+<ParamField path="NEXT_PUBLIC_APP_URL" type="string" default="http://localhost:3000">
+  The base URL where your Next.js application is hosted.
+  
+  **Example:** `http://localhost:3000` (development) or `https://your-domain.com` (production)
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_API_URL" type="string" default="http://localhost:5001">
+  The base URL for the backend Flask API server.
+  
+  **Example:** `http://localhost:5001`
+  
+  This is used in `lib/api.ts` for all API requests to `/api/scrape-followers`, `/api/distribute`, etc.
+</ParamField>
+
+### Supabase Configuration
+
+<ParamField path="NEXT_PUBLIC_SUPABASE_URL" type="string" required>
+  Your Supabase project URL.
+  
+  **Format:** `https://your-project.supabase.co`
+  
+  **Where to find:** Supabase Dashboard → Settings → API → Project URL
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_SUPABASE_ANON_KEY" type="string" required>
+  Your Supabase anonymous (public) API key.
+  
+  **Where to find:** Supabase Dashboard → Settings → API → Project API keys → `anon` `public`
+  
+  <Warning>
+    This key is safe to use in the browser as it's protected by Row Level Security (RLS) policies.
+  </Warning>
+</ParamField>
+
+### Authentication Credentials
+
+<ParamField path="NEXT_PUBLIC_LOGIN_USERNAME" type="string" required>
+  The username for application login (used in `/callum` route).
+  
+  **Used in:** `app/callum/page.tsx`
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_LOGIN_PASSWORD" type="string" required>
+  The password for application login and source profile deletion.
+  
+  **Used in:** 
+  - `app/callum/page.tsx` (login authentication)
+  - `components/edit-source-profiles-dialog.tsx` (delete confirmation)
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_LOGIN_OTP" type="string" required>
+  The one-time password (OTP) for application login.
+  
+  **Example:** `123456`
+  
+  **Used in:** `app/callum/page.tsx`
+</ParamField>
+
+### Campaign Configuration
+
+<ParamField path="NEXT_PUBLIC_NUM_VA_TABLES" type="number" default="80">
+  The number of Virtual Assistant (VA) tables for profile distribution.
+  
+  **Used in:** `components/username-status-card.tsx`
+  
+  This determines how many Airtable tables profiles will be distributed across.
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_PROFILES_PER_TABLE" type="number" default="180">
+  The number of profiles to assign to each VA table per campaign.
+  
+  **Used in:** 
+  - `components/username-status-card.tsx`
+  - `components/payments-table.tsx`
+  
+  **Daily target calculation:** `NUM_VA_TABLES × PROFILES_PER_TABLE = 80 × 180 = 14,400 profiles`
+</ParamField>
+
+## Backend Environment Variables
+
+These variables are used by the Flask API backend (typically in a separate `server/` directory).
+
+<Warning>
+  Backend environment variables should **never** be prefixed with `NEXT_PUBLIC_` as they contain sensitive API keys.
+</Warning>
+
+### Supabase Configuration
+
+<ParamField path="SUPABASE_URL" type="string" required>
+  Your Supabase project URL (same as frontend, but without `NEXT_PUBLIC_` prefix).
+  
+  **Format:** `https://your-project.supabase.co`
+</ParamField>
+
+<ParamField path="SUPABASE_KEY" type="string" required>
+  Your Supabase **service role** key for server-side operations.
+  
+  **Where to find:** Supabase Dashboard → Settings → API → Project API keys → `service_role` `secret`
+  
+  <Warning>
+    This key bypasses Row Level Security. Keep it secret and never expose it in the frontend.
+  </Warning>
+</ParamField>
+
+### Apify Configuration
+
+<ParamField path="APIFY_API_KEY" type="string" required>
+  Your Apify API token for authenticating scraping requests.
+  
+  **Where to find:** Apify Console → Settings → Integrations → Personal API tokens
+  
+  **Used for:** Instagram follower scraping via Apify actors
+</ParamField>
+
+<ParamField path="APIFY_ACTOR_ID" type="string" required>
+  The ID of the Apify actor used for Instagram scraping.
+  
+  **Format:** `your-username/actor-name` or actor ID
+  
+  **Used for:** Specifying which Apify actor to run for scraping operations
+</ParamField>
+
+### Airtable Configuration
+
+<ParamField path="AIRTABLE_API_KEY" type="string" required>
+  Your Airtable personal access token or API key.
+  
+  **Where to find:** Airtable → Account → API → Generate API key (deprecated) or Personal Access Tokens (recommended)
+  
+  **Used for:** Syncing scraped profiles to VA tables in Airtable
+</ParamField>
+
+<ParamField path="AIRTABLE_BASE_ID" type="string" required>
+  The ID of your Airtable base where VA tables are located.
+  
+  **Format:** `appXXXXXXXXXXXXXX`
+  
+  **Where to find:** Airtable API documentation or base URL: `https://airtable.com/{BASE_ID}/...`
+  
+  <Info>
+    In the multi-tenant architecture, each scraping job can have its own `airtable_base_id` stored in the database.
+  </Info>
+</ParamField>
+
+### Optional: Gender Detection
+
+<ParamField path="GENDER_API_KEY" type="string">
+  API key for gender detection service (optional).
+  
+  **Used for:** Filtering scraped profiles by detected gender (male/female)
+  
+  If not provided, gender filtering may not be available.
+</ParamField>
+
+## Environment File Template
+
+### Frontend `.env.local`
+
+<CodeGroup>
+```bash .env.local
+# App URLs
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_API_URL=http://localhost:5001
+
+# Supabase Configuration
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
+
+# Authentication Credentials
+NEXT_PUBLIC_LOGIN_USERNAME=your-username
+NEXT_PUBLIC_LOGIN_PASSWORD=your-password
+NEXT_PUBLIC_LOGIN_OTP=123456
+
+# Campaign Configuration
+NEXT_PUBLIC_NUM_VA_TABLES=80
+NEXT_PUBLIC_PROFILES_PER_TABLE=180
+```
+</CodeGroup>
+
+### Backend `.env`
+
+<CodeGroup>
+```bash .env
+# Supabase
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your-service-role-key
+
+# Apify (Instagram Scraper)
+APIFY_API_KEY=your-apify-key
+APIFY_ACTOR_ID=your-actor-id
+
+# Airtable
+AIRTABLE_API_KEY=your-airtable-key
+AIRTABLE_BASE_ID=your-base-id
+
+# Gender Detection API (optional)
+GENDER_API_KEY=your-gender-api-key
+```
+</CodeGroup>
+
+## Security Best Practices
+
+<Warning>
+  - Never commit `.env.local` or `.env` files to version control
+  - Add these files to `.gitignore`
+  - Rotate API keys regularly
+  - Use different credentials for development and production
+  - Never expose service role keys in the frontend
+</Warning>
+
+<Info>
+  The project includes `.env.local` and `.env` in `.gitignore` by default.
+</Info>
+
+## Validation
+
+The application gracefully handles missing environment variables:
+
+- **Supabase client** (`lib/supabase.ts`): Uses placeholder values if env vars are missing (for build time)
+- **API client** (`lib/api.ts`): Falls back to `http://localhost:5001` if `NEXT_PUBLIC_API_URL` is not set
+- **Runtime checks**: The application will fail gracefully and show error messages if required credentials are missing
+
+## Troubleshooting
+
+### "Cannot connect to Supabase"
+
+1. Verify `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are correct
+2. Check that your Supabase project is active (not paused)
+3. Ensure RLS policies are configured correctly
+
+### "API requests failing"
+
+1. Verify `NEXT_PUBLIC_API_URL` points to your running Flask server
+2. Check that the backend is running on the specified port
+3. Ensure CORS is configured properly on the backend
+
+### "Authentication not working"
+
+1. Double-check `NEXT_PUBLIC_LOGIN_USERNAME`, `NEXT_PUBLIC_LOGIN_PASSWORD`, and `NEXT_PUBLIC_LOGIN_OTP`
+2. Remember these are environment variables, not hardcoded values
+3. Restart the development server after changing `.env.local`
+
+<Note>
+  After modifying environment variables, always restart your development server (`npm run dev`) for changes to take effect.
+</Note>

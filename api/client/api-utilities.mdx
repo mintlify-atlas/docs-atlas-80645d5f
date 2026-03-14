@@ -1,0 +1,456 @@
+---
+title: "API Utilities"
+description: "HTTP client functions with automatic multi-tenant base_id injection"
+---
+
+The API utilities module provides type-safe HTTP client functions that automatically inject the `base_id` header for multi-tenant operations.
+
+## Overview
+
+All API utility functions:
+
+- Automatically add the `X-Base-Id` header for multi-tenant isolation
+- Use `NEXT_PUBLIC_API_URL` environment variable (defaults to `http://localhost:5001`)
+- Return type-safe responses with TypeScript generics
+- Handle JSON serialization/deserialization automatically
+
+---
+
+## Core Functions
+
+### apiRequest
+
+Low-level function to make an API request with `base_id` automatically injected.
+
+```typescript
+async function apiRequest(
+  url: string,
+  baseId: string,
+  config?: ApiRequestConfig
+): Promise<Response>
+```
+
+<ParamField path="url" type="string" required>
+  The API endpoint URL (absolute or relative)
+</ParamField>
+
+<ParamField path="baseId" type="string" required>
+  The Airtable base ID for multi-tenant isolation
+</ParamField>
+
+<ParamField path="config" type="ApiRequestConfig">
+  Optional fetch configuration
+  
+  <ParamField path="config.headers" type="HeadersInit">
+    Additional headers to include
+  </ParamField>
+  
+  <ParamField path="config.method" type="string">
+    HTTP method (GET, POST, PUT, DELETE, etc.)
+  </ParamField>
+  
+  <ParamField path="config.body" type="any">
+    Request body (will be JSON stringified)
+  </ParamField>
+</ParamField>
+
+**Returns:** Native `Response` object from the Fetch API
+
+<Warning>
+This function throws an error if `baseId` is not provided. Always pass a valid `base_id` from `useBase()` hook or `getActiveBaseId()`.
+</Warning>
+
+**Example:**
+
+```typescript
+import { apiRequest } from '@/lib/api'
+import { useBase } from '@/contexts/BaseContext'
+
+const { baseId } = useBase()
+
+const response = await apiRequest('/api/scrape-followers', baseId, {
+  method: 'POST',
+  body: JSON.stringify({ usernames: ['user1', 'user2'] })
+})
+
+const data = await response.json()
+```
+
+---
+
+### apiGet
+
+Make a GET request with automatic JSON parsing.
+
+```typescript
+async function apiGet<T = any>(
+  url: string,
+  baseId: string,
+  config?: ApiRequestConfig
+): Promise<T>
+```
+
+<ParamField path="url" type="string" required>
+  API endpoint URL
+</ParamField>
+
+<ParamField path="baseId" type="string" required>
+  Base ID for multi-tenant isolation
+</ParamField>
+
+<ParamField path="config" type="ApiRequestConfig">
+  Optional fetch configuration
+</ParamField>
+
+**Returns:** Parsed JSON response with type `T`
+
+**Example:**
+
+```typescript
+import { apiGet } from '@/lib/api'
+import { useBase } from '@/contexts/BaseContext'
+
+interface FollowersResponse {
+  followers: string[]
+  count: number
+}
+
+const { baseId } = useBase()
+
+const data = await apiGet<FollowersResponse>(
+  '/api/followers',
+  baseId
+)
+
+console.log(`Found ${data.count} followers`)
+```
+
+---
+
+### apiPost
+
+Make a POST request with automatic JSON serialization and parsing.
+
+```typescript
+async function apiPost<T = any>(
+  url: string,
+  baseId: string,
+  body?: any,
+  config?: ApiRequestConfig
+): Promise<T>
+```
+
+<ParamField path="url" type="string" required>
+  API endpoint URL
+</ParamField>
+
+<ParamField path="baseId" type="string" required>
+  Base ID for multi-tenant isolation
+</ParamField>
+
+<ParamField path="body" type="any">
+  Request body (will be JSON stringified)
+</ParamField>
+
+<ParamField path="config" type="ApiRequestConfig">
+  Optional fetch configuration
+</ParamField>
+
+**Returns:** Parsed JSON response with type `T`
+
+**Example:**
+
+```typescript
+import { apiPost } from '@/lib/api'
+import { useBase } from '@/contexts/BaseContext'
+
+interface ScrapeRequest {
+  usernames: string[]
+  platform: string
+}
+
+interface ScrapeResponse {
+  job_id: string
+  status: string
+}
+
+const { baseId } = useBase()
+
+const result = await apiPost<ScrapeResponse>(
+  '/api/scrape-followers',
+  baseId,
+  {
+    usernames: ['user1', 'user2'],
+    platform: 'instagram'
+  } as ScrapeRequest
+)
+
+console.log('Job ID:', result.job_id)
+```
+
+---
+
+### apiPut
+
+Make a PUT request with automatic JSON serialization and parsing.
+
+```typescript
+async function apiPut<T = any>(
+  url: string,
+  baseId: string,
+  body?: any,
+  config?: ApiRequestConfig
+): Promise<T>
+```
+
+<ParamField path="url" type="string" required>
+  API endpoint URL
+</ParamField>
+
+<ParamField path="baseId" type="string" required>
+  Base ID for multi-tenant isolation
+</ParamField>
+
+<ParamField path="body" type="any">
+  Request body (will be JSON stringified)
+</ParamField>
+
+<ParamField path="config" type="ApiRequestConfig">
+  Optional fetch configuration
+</ParamField>
+
+**Returns:** Parsed JSON response with type `T`
+
+**Example:**
+
+```typescript
+import { apiPut } from '@/lib/api'
+import { useBase } from '@/contexts/BaseContext'
+
+interface UpdateJobRequest {
+  status: string
+  num_vas: number
+}
+
+const { baseId } = useBase()
+
+const result = await apiPut(
+  '/api/jobs/550e8400-...',
+  baseId,
+  {
+    status: 'active',
+    num_vas: 10
+  } as UpdateJobRequest
+)
+```
+
+---
+
+### apiDelete
+
+Make a DELETE request.
+
+```typescript
+async function apiDelete<T = any>(
+  url: string,
+  baseId: string,
+  config?: ApiRequestConfig
+): Promise<T>
+```
+
+<ParamField path="url" type="string" required>
+  API endpoint URL
+</ParamField>
+
+<ParamField path="baseId" type="string" required>
+  Base ID for multi-tenant isolation
+</ParamField>
+
+<ParamField path="config" type="ApiRequestConfig">
+  Optional fetch configuration
+</ParamField>
+
+**Returns:** Parsed JSON response with type `T`
+
+**Example:**
+
+```typescript
+import { apiDelete } from '@/lib/api'
+import { useBase } from '@/contexts/BaseContext'
+
+const { baseId } = useBase()
+
+const result = await apiDelete(
+  '/api/jobs/550e8400-...',
+  baseId
+)
+```
+
+---
+
+## TypeScript Types
+
+### ApiRequestConfig
+
+Extends the native `RequestInit` interface with additional options.
+
+```typescript
+interface ApiRequestConfig extends RequestInit {
+  /** Optional base_id to override context value */
+  baseId?: string
+  /** Additional headers to include */
+  headers?: HeadersInit
+}
+```
+
+---
+
+## Usage Patterns
+
+### With useBase Hook
+
+The recommended pattern in React components:
+
+```typescript
+import { apiPost } from '@/lib/api'
+import { useBase } from '@/contexts/BaseContext'
+
+function MyComponent() {
+  const { baseId } = useBase()
+  
+  const handleScrape = async () => {
+    const result = await apiPost('/api/scrape-followers', baseId, {
+      usernames: ['user1', 'user2']
+    })
+    console.log(result)
+  }
+  
+  return <button onClick={handleScrape}>Scrape</button>
+}
+```
+
+### With getActiveBaseId
+
+For server-side or non-React usage:
+
+```typescript
+import { apiPost } from '@/lib/api'
+import { getActiveBaseId } from '@/lib/scraping-jobs'
+
+async function scrapeFollowers() {
+  const baseId = await getActiveBaseId()
+  
+  if (!baseId) {
+    throw new Error('No active base found')
+  }
+  
+  const result = await apiPost('/api/scrape-followers', baseId, {
+    usernames: ['user1', 'user2']
+  })
+  
+  return result
+}
+```
+
+### Type-Safe Requests
+
+Use TypeScript generics for type-safe API calls:
+
+```typescript
+import { apiPost } from '@/lib/api'
+
+interface CreateJobRequest {
+  influencer_name: string
+  platform: 'instagram' | 'tiktok'
+}
+
+interface CreateJobResponse {
+  job_id: string
+  status: string
+  created_at: string
+}
+
+const response = await apiPost<CreateJobResponse>(
+  '/api/jobs',
+  baseId,
+  {
+    influencer_name: 'JohnDoe',
+    platform: 'instagram'
+  } as CreateJobRequest
+)
+
+// TypeScript knows response has job_id, status, created_at
+console.log(response.job_id)
+```
+
+### Error Handling
+
+```typescript
+import { apiPost } from '@/lib/api'
+
+try {
+  const result = await apiPost('/api/scrape-followers', baseId, data)
+  console.log('Success:', result)
+} catch (error) {
+  if (error instanceof Error) {
+    console.error('API Error:', error.message)
+  }
+}
+```
+
+---
+
+## Environment Variables
+
+```bash
+# .env.local
+NEXT_PUBLIC_API_URL=http://localhost:5001
+```
+
+<Info>
+The API URL defaults to `http://localhost:5001` if not specified.
+</Info>
+
+---
+
+## Headers
+
+All API utility functions automatically set:
+
+```http
+X-Base-Id: <baseId>
+Content-Type: application/json
+```
+
+You can add additional headers via the `config` parameter:
+
+```typescript
+const result = await apiPost('/api/endpoint', baseId, data, {
+  headers: {
+    'X-Custom-Header': 'value'
+  }
+})
+```
+
+---
+
+## Import Path
+
+```typescript
+import {
+  apiRequest,
+  apiGet,
+  apiPost,
+  apiPut,
+  apiDelete,
+  type ApiRequestConfig
+} from '@/lib/api'
+```
+
+---
+
+## See Also
+
+- [Scraping Jobs API](/api/client/scraping-jobs) - Job management functions
+- [Supabase Client](/api/client/supabase) - Database client
+- [Base Context](/guides/multi-tenant-setup) - React context for base_id management

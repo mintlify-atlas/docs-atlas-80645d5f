@@ -1,0 +1,662 @@
+---
+title: "Scraping Jobs API"
+description: "TypeScript client functions for managing multi-tenant scraping jobs"
+---
+
+The scraping jobs API provides comprehensive utilities for creating, managing, and querying scraping jobs with full multi-tenant support.
+
+## Core Functions
+
+### createScrapingJob
+
+Create a new scraping job for an influencer.
+
+```typescript
+async function createScrapingJob(
+  input: CreateScrapingJobInput
+): Promise<ScrapingJob | null>
+```
+
+<ParamField path="input" type="CreateScrapingJobInput" required>
+  Job creation parameters
+  
+  <ParamField path="input.influencer_name" type="string" required>
+    Name of the influencer being scraped
+  </ParamField>
+  
+  <ParamField path="input.platform" type="Platform" required>
+    Social media platform: `'instagram'` | `'threads'` | `'tiktok'` | `'x'`
+  </ParamField>
+  
+  <ParamField path="input.airtable_base_id" type="string" required>
+    Airtable base ID for multi-tenant isolation
+  </ParamField>
+  
+  <ParamField path="input.num_vas" type="number">
+    Number of virtual assistants (optional)
+  </ParamField>
+  
+  <ParamField path="input.status" type="JobStatus">
+    Initial status: `'active'` | `'paused'` | `'archived'` (defaults to `'active'`)
+  </ParamField>
+</ParamField>
+
+**Returns:** The created `ScrapingJob` object or `null` on error
+
+**Example:**
+
+```typescript
+import { createScrapingJob } from '@/lib/scraping-jobs'
+
+const job = await createScrapingJob({
+  influencer_name: 'JohnDoe',
+  platform: 'instagram',
+  airtable_base_id: 'appXXXXXXXXXXXXXX',
+  num_vas: 5,
+  status: 'active'
+})
+
+if (job) {
+  console.log('Created job:', job.job_id)
+}
+```
+
+---
+
+### getAllJobs
+
+Retrieve all scraping jobs ordered by creation date.
+
+```typescript
+async function getAllJobs(): Promise<ScrapingJob[]>
+```
+
+**Returns:** Array of all scraping jobs, most recent first
+
+**Example:**
+
+```typescript
+import { getAllJobs } from '@/lib/scraping-jobs'
+
+const jobs = await getAllJobs()
+console.log(`Found ${jobs.length} jobs`)
+```
+
+---
+
+### getJobById
+
+Get a specific scraping job by its ID.
+
+```typescript
+async function getJobById(jobId: string): Promise<ScrapingJob | null>
+```
+
+<ParamField path="jobId" type="string" required>
+  UUID of the scraping job
+</ParamField>
+
+**Returns:** The `ScrapingJob` object or `null` if not found
+
+**Example:**
+
+```typescript
+import { getJobById } from '@/lib/scraping-jobs'
+
+const job = await getJobById('550e8400-e29b-41d4-a716-446655440000')
+if (job) {
+  console.log('Influencer:', job.influencer_name)
+  console.log('Platform:', job.platform)
+}
+```
+
+---
+
+### getActiveJob
+
+Get the currently active scraping job. Returns the first job with `status='active'`, or the most recent job if none are active.
+
+<Note>
+This is the primary method for determining which `base_id` to use for multi-tenant operations.
+</Note>
+
+```typescript
+async function getActiveJob(): Promise<ScrapingJob | null>
+```
+
+**Returns:** The active scraping job or `null` if no jobs exist
+
+**Example:**
+
+```typescript
+import { getActiveJob } from '@/lib/scraping-jobs'
+
+const activeJob = await getActiveJob()
+if (activeJob) {
+  console.log('Active base_id:', activeJob.base_id)
+  console.log('Influencer:', activeJob.influencer_name)
+}
+```
+
+---
+
+### getActiveBaseId
+
+Convenience method to get just the `base_id` from the active job.
+
+```typescript
+async function getActiveBaseId(): Promise<string | null>
+```
+
+**Returns:** The `base_id` string from the active job, or `null`
+
+**Example:**
+
+```typescript
+import { getActiveBaseId } from '@/lib/scraping-jobs'
+import { apiPost } from '@/lib/api'
+
+const baseId = await getActiveBaseId()
+if (baseId) {
+  const result = await apiPost('/api/scrape-followers', baseId, {
+    usernames: ['user1', 'user2']
+  })
+}
+```
+
+---
+
+## Query Functions
+
+### getJobsByPlatform
+
+Filter jobs by social media platform.
+
+```typescript
+async function getJobsByPlatform(
+  platform: Platform,
+  activeOnly?: boolean
+): Promise<ScrapingJob[]>
+```
+
+<ParamField path="platform" type="Platform" required>
+  Platform to filter: `'instagram'` | `'threads'` | `'tiktok'` | `'x'`
+</ParamField>
+
+<ParamField path="activeOnly" type="boolean" default="false">
+  If `true`, only return jobs with `status='active'`
+</ParamField>
+
+**Example:**
+
+```typescript
+import { getJobsByPlatform } from '@/lib/scraping-jobs'
+
+// Get all Instagram jobs
+const instagramJobs = await getJobsByPlatform('instagram')
+
+// Get only active TikTok jobs
+const activeTikTokJobs = await getJobsByPlatform('tiktok', true)
+```
+
+---
+
+### getJobsByStatus
+
+Filter jobs by their status.
+
+```typescript
+async function getJobsByStatus(status: JobStatus): Promise<ScrapingJob[]>
+```
+
+<ParamField path="status" type="JobStatus" required>
+  Status to filter: `'active'` | `'paused'` | `'archived'`
+</ParamField>
+
+**Example:**
+
+```typescript
+import { getJobsByStatus } from '@/lib/scraping-jobs'
+
+const pausedJobs = await getJobsByStatus('paused')
+const archivedJobs = await getJobsByStatus('archived')
+```
+
+---
+
+### searchJobsByInfluencer
+
+Search jobs by influencer name (case-insensitive partial match).
+
+```typescript
+async function searchJobsByInfluencer(
+  searchTerm: string
+): Promise<ScrapingJob[]>
+```
+
+<ParamField path="searchTerm" type="string" required>
+  Search string to match against influencer names
+</ParamField>
+
+**Example:**
+
+```typescript
+import { searchJobsByInfluencer } from '@/lib/scraping-jobs'
+
+const jobs = await searchJobsByInfluencer('john')
+// Matches: "John Doe", "Johnny", "johnson", etc.
+```
+
+---
+
+## Statistics Functions
+
+### getJobStatisticsByBaseId
+
+Get comprehensive statistics for a job using its `base_id`.
+
+<Info>
+This is the recommended method for getting statistics in multi-tenant environments.
+</Info>
+
+```typescript
+async function getJobStatisticsByBaseId(
+  baseId: string
+): Promise<JobStatistics | null>
+```
+
+<ParamField path="baseId" type="string" required>
+  Airtable base ID for multi-tenant filtering
+</ParamField>
+
+**Returns:** `JobStatistics` object:
+
+```typescript
+interface JobStatistics {
+  totalUsernames: number
+  usedUsernames: number
+  availableUsernames: number
+  totalAssignments: number
+  totalScrapeResults: number
+}
+```
+
+**Example:**
+
+```typescript
+import { getJobStatisticsByBaseId } from '@/lib/scraping-jobs'
+
+const stats = await getJobStatisticsByBaseId('appXXXXXXXXXXXXXX')
+if (stats) {
+  console.log('Total usernames:', stats.totalUsernames)
+  console.log('Available:', stats.availableUsernames)
+  console.log('Used:', stats.usedUsernames)
+}
+```
+
+---
+
+### getJobWithStats
+
+Get a job combined with its statistics.
+
+```typescript
+async function getJobWithStats(
+  jobId: string
+): Promise<ScrapingJobWithStats | null>
+```
+
+**Returns:** `ScrapingJobWithStats` object (job data + stats)
+
+**Example:**
+
+```typescript
+import { getJobWithStats } from '@/lib/scraping-jobs'
+
+const jobWithStats = await getJobWithStats('550e8400...')
+if (jobWithStats) {
+  console.log('Job:', jobWithStats.influencer_name)
+  console.log('Stats:', jobWithStats.stats.totalUsernames)
+}
+```
+
+---
+
+### getAllJobsWithStats
+
+Get all jobs with their statistics included.
+
+```typescript
+async function getAllJobsWithStats(): Promise<ScrapingJobWithStats[]>
+```
+
+**Example:**
+
+```typescript
+import { getAllJobsWithStats } from '@/lib/scraping-jobs'
+
+const jobsWithStats = await getAllJobsWithStats()
+jobsWithStats.forEach(job => {
+  console.log(`${job.influencer_name}: ${job.stats.totalUsernames} usernames`)
+})
+```
+
+---
+
+## Update Functions
+
+### updateJob
+
+Update specific fields of a scraping job.
+
+```typescript
+async function updateJob(
+  jobId: string,
+  updates: UpdateScrapingJobInput
+): Promise<boolean>
+```
+
+<ParamField path="jobId" type="string" required>
+  UUID of the job to update
+</ParamField>
+
+<ParamField path="updates" type="UpdateScrapingJobInput" required>
+  Fields to update (all optional):
+  
+  <ParamField path="influencer_name" type="string">
+    Update influencer name
+  </ParamField>
+  
+  <ParamField path="platform" type="Platform">
+    Update platform
+  </ParamField>
+  
+  <ParamField path="airtable_base_id" type="string">
+    Update base ID
+  </ParamField>
+  
+  <ParamField path="num_vas" type="number">
+    Update number of VAs
+  </ParamField>
+  
+  <ParamField path="status" type="JobStatus">
+    Update status
+  </ParamField>
+</ParamField>
+
+**Returns:** `true` if successful, `false` on error
+
+**Example:**
+
+```typescript
+import { updateJob } from '@/lib/scraping-jobs'
+
+const success = await updateJob('550e8400...', {
+  num_vas: 10,
+  status: 'active'
+})
+```
+
+---
+
+### updateJobStatus
+
+Update only the status of a job.
+
+```typescript
+async function updateJobStatus(
+  jobId: string,
+  status: JobStatus
+): Promise<boolean>
+```
+
+**Example:**
+
+```typescript
+import { updateJobStatus } from '@/lib/scraping-jobs'
+
+await updateJobStatus('550e8400...', 'paused')
+```
+
+---
+
+### activateJob
+
+Convenience method to set job status to `'active'`.
+
+```typescript
+async function activateJob(jobId: string): Promise<boolean>
+```
+
+---
+
+### pauseJob
+
+Convenience method to set job status to `'paused'`.
+
+```typescript
+async function pauseJob(jobId: string): Promise<boolean>
+```
+
+---
+
+### archiveJob
+
+Convenience method to set job status to `'archived'` (soft delete).
+
+```typescript
+async function archiveJob(jobId: string): Promise<boolean>
+```
+
+**Example:**
+
+```typescript
+import { activateJob, pauseJob, archiveJob } from '@/lib/scraping-jobs'
+
+// Activate a job
+await activateJob('550e8400...')
+
+// Pause a job
+await pauseJob('550e8400...')
+
+// Archive (soft delete) a job
+await archiveJob('550e8400...')
+```
+
+---
+
+## Data Management Functions
+
+### addUsernamesToJob
+
+Add usernames to a job's global username pool.
+
+```typescript
+async function addUsernamesToJob(
+  jobId: string,
+  baseId: string,
+  usernames: Array<{
+    id: string
+    username: string
+    full_name?: string
+  }>
+): Promise<boolean>
+```
+
+<ParamField path="jobId" type="string" required>
+  Job ID to add usernames to
+</ParamField>
+
+<ParamField path="baseId" type="string" required>
+  Base ID for multi-tenant isolation
+</ParamField>
+
+<ParamField path="usernames" type="array" required>
+  Array of username objects to add
+</ParamField>
+
+**Example:**
+
+```typescript
+import { addUsernamesToJob } from '@/lib/scraping-jobs'
+
+const success = await addUsernamesToJob(
+  '550e8400...',
+  'appXXXXXXXXXXXXXX',
+  [
+    { id: '12345', username: 'user1', full_name: 'User One' },
+    { id: '67890', username: 'user2', full_name: 'User Two' }
+  ]
+)
+```
+
+---
+
+### createJobAssignments
+
+Create daily assignments for a job.
+
+```typescript
+async function createJobAssignments(
+  jobId: string,
+  campaignId: string,
+  baseId: string,
+  assignments: Array<{
+    id: string
+    username: string
+    full_name?: string
+    va_table_number: number
+    position: number
+  }>
+): Promise<boolean>
+```
+
+<ParamField path="jobId" type="string" required>
+  Job ID for the assignments
+</ParamField>
+
+<ParamField path="campaignId" type="string" required>
+  Campaign ID
+</ParamField>
+
+<ParamField path="baseId" type="string" required>
+  Base ID for multi-tenant isolation
+</ParamField>
+
+<ParamField path="assignments" type="array" required>
+  Array of assignment objects
+</ParamField>
+
+**Example:**
+
+```typescript
+import { createJobAssignments } from '@/lib/scraping-jobs'
+
+const success = await createJobAssignments(
+  '550e8400...',
+  'campaign-123',
+  'appXXXXXXXXXXXXXX',
+  [
+    {
+      id: '12345',
+      username: 'user1',
+      full_name: 'User One',
+      va_table_number: 1,
+      position: 0
+    }
+  ]
+)
+```
+
+---
+
+### getJobUsernames
+
+Get all usernames associated with a job.
+
+```typescript
+async function getJobUsernames(
+  jobId: string,
+  onlyAvailable?: boolean
+): Promise<GlobalUsername[]>
+```
+
+<ParamField path="jobId" type="string" required>
+  Job ID to query
+</ParamField>
+
+<ParamField path="onlyAvailable" type="boolean" default="false">
+  If `true`, only return unused usernames (`used = false`)
+</ParamField>
+
+**Example:**
+
+```typescript
+import { getJobUsernames } from '@/lib/scraping-jobs'
+
+// Get all usernames
+const allUsernames = await getJobUsernames('550e8400...')
+
+// Get only available (unused) usernames
+const availableUsernames = await getJobUsernames('550e8400...', true)
+```
+
+---
+
+### getJobAssignments
+
+Get all assignments for a job.
+
+```typescript
+async function getJobAssignments(
+  jobId: string
+): Promise<DailyAssignment[]>
+```
+
+**Example:**
+
+```typescript
+import { getJobAssignments } from '@/lib/scraping-jobs'
+
+const assignments = await getJobAssignments('550e8400...')
+console.log(`Found ${assignments.length} assignments`)
+```
+
+---
+
+## TypeScript Types
+
+See the [TypeScript Types](/database/scraping-jobs) reference for detailed type definitions:
+
+- `ScrapingJob`
+- `CreateScrapingJobInput`
+- `UpdateScrapingJobInput`
+- `ScrapingJobWithStats`
+- `JobStatistics`
+- `Platform`
+- `JobStatus`
+- `GlobalUsername`
+- `DailyAssignment`
+
+---
+
+## Import Path
+
+```typescript
+import {
+  createScrapingJob,
+  getAllJobs,
+  getJobById,
+  getActiveJob,
+  getActiveBaseId,
+  // ... other functions
+} from '@/lib/scraping-jobs'
+```
+
+---
+
+## See Also
+
+- [API Utilities](/api/client/api-utilities) - HTTP client functions
+- [Supabase Client](/api/client/supabase) - Database client creation
+- [Scraping Jobs Types](/database/scraping-jobs) - TypeScript type definitions

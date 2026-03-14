@@ -1,0 +1,364 @@
+---
+title: 'source_profiles Table'
+description: 'Instagram accounts to scrape followers from'
+icon: 'user-group'
+---
+
+## Overview
+
+The `source_profiles` table stores Instagram account usernames that serve as **sources** for follower scraping. These are typically influencer accounts or target accounts whose followers will be extracted and analyzed.
+
+<Info>
+Source profiles are managed through the "Edit Source Profiles" dialog in the Dependencies Card component.
+</Info>
+
+## Schema Definition
+
+```sql
+CREATE TABLE source_profiles (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  username TEXT NOT NULL UNIQUE,
+  base_id TEXT NOT NULL,  -- Multi-tenant isolation key
+  created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+## Column Reference
+
+<ResponseField name="id" type="UUID" required>
+  Primary key - Auto-generated unique identifier
+  
+  ```typescript
+  id: string // UUID format
+  ```
+</ResponseField>
+
+<ResponseField name="username" type="TEXT" required>
+  Instagram username (without @ symbol)
+  
+  ```typescript
+  username: string // e.g., "taylorswift"
+  ```
+  
+  **Constraints:**
+  - Must be unique across all source profiles
+  - No @ symbol prefix
+  - Case-insensitive in queries
+  
+  <Note>
+  Usernames are extracted from Instagram URLs if users paste full URLs instead of just usernames.
+  </Note>
+</ResponseField>
+
+<ResponseField name="base_id" type="TEXT" required>
+  Multi-tenant isolation key - Links to scraping job's base_id
+  
+  ```typescript
+  base_id: string // e.g., "appXYZ123"
+  ```
+  
+  <Warning>
+  Must match the base_id from the active scraping job to ensure proper data isolation.
+  </Warning>
+</ResponseField>
+
+<ResponseField name="created_at" type="TIMESTAMP" default="NOW()">
+  Timestamp when the source profile was added
+  
+  ```typescript
+  created_at: string // ISO 8601 format
+  ```
+</ResponseField>
+
+## TypeScript Interface
+
+```typescript
+export interface SourceProfile {
+  id: string;
+  username: string;
+  base_id: string;
+  created_at: string;
+}
+```
+
+## Indexes and Constraints
+
+```sql
+-- Primary key index
+CREATE INDEX idx_source_profiles_pkey ON source_profiles(id);
+
+-- Unique username constraint
+CREATE UNIQUE INDEX idx_source_profiles_username ON source_profiles(username);
+
+-- Multi-tenant isolation
+CREATE INDEX idx_source_profiles_base_id ON source_profiles(base_id);
+
+-- Composite index for multi-tenant queries
+CREATE INDEX idx_source_profiles_base_username ON source_profiles(base_id, username);
+```
+
+## Common Queries
+
+### Get All Source Profiles
+
+```typescript
+import { supabase } from '@/lib/supabase'
+import { getActiveBaseId } from '@/lib/scraping-jobs'
+
+const baseId = await getActiveBaseId()
+const { data: profiles, error } = await supabase
+  .from('source_profiles')
+  .select('*')
+  .eq('base_id', baseId)
+  .order('created_at', { ascending: false })
+```
+
+### Add Source Profile
+
+```typescript
+import { createSupabaseClientWithContext } from '@/lib/supabase'
+
+const client = createSupabaseClientWithContext(baseId)
+const { data, error } = await client
+  .from('source_profiles')
+  .insert({
+    username: 'taylorswift',
+    base_id: baseId
+  })
+  .select()
+  .single()
+```
+
+### Remove Source Profile
+
+```typescript
+const { error } = await client
+  .from('source_profiles')
+  .delete()
+  .eq('id', profileId)
+  .eq('base_id', baseId) // Multi-tenant safety
+```
+
+### Check if Username Exists
+
+```typescript
+const { data, error } = await client
+  .from('source_profiles')
+  .select('id')
+  .eq('username', username)
+  .eq('base_id', baseId)
+  .maybeSingle()
+
+const exists = !!data
+```
+
+## Username Validation
+
+### Extract Username from URL
+
+```typescript
+function extractUsername(input: string): string {
+  // Handle Instagram URLs
+  const urlPattern = /instagram\.com\/([a-zA-Z0-9._]+)/
+  const match = input.match(urlPattern)
+  
+  if (match) {
+    return match[1] // Extract username from URL
+  }
+  
+  // Remove @ symbol if present
+  return input.replace('@', '').trim()
+}
+
+// Usage
+const username = extractUsername('https://instagram.com/taylorswift')
+// Returns: "taylorswift"
+```
+
+### Validate Username Format
+
+```typescript
+function isValidInstagramUsername(username: string): boolean {
+  // Instagram usernames: 1-30 chars, alphanumeric + . and _
+  const pattern = /^[a-zA-Z0-9._]{1,30}$/
+  return pattern.test(username)
+}
+```
+
+## UI Integration
+
+### Dependencies Card Component
+
+Source profiles are managed through the **Edit Source Profiles** dialog:
+
+```typescript
+// components/edit-source-profiles-dialog.tsx
+const handleAddProfile = async () => {
+  const username = extractUsername(inputValue)
+  
+  if (!isValidInstagramUsername(username)) {
+    toast.error('Invalid Instagram username')
+    return
+  }
+  
+  const { error } = await client
+    .from('source_profiles')
+    .insert({ username, base_id: baseId })
+  
+  if (error) {
+    if (error.code === '23505') { // Unique violation
+      toast.error('Username already exists')
+    } else {
+      toast.error('Failed to add profile')
+    }
+  } else {
+    toast.success('Profile added')
+  }
+}
+```
+
+## Scraping Workflow
+
+### 1. Add Source Profiles
+
+Users add Instagram accounts to scrape:
+
+```typescript
+// Add multiple source profiles
+const usernames = ['taylorswift', 'arianagrande', 'selenagomez']
+
+for (const username of usernames) {
+  await client
+    .from('source_profiles')
+    .insert({ username, base_id: baseId })
+}
+```
+
+### 2. Fetch for Scraping
+
+When scraping starts, fetch all source profiles:
+
+```typescript
+const { data: profiles } = await client
+  .from('source_profiles')
+  .select('username')
+  .eq('base_id', baseId)
+
+const usernames = profiles.map(p => p.username)
+// Pass to scraping API
+```
+
+### 3. API Integration
+
+Send source accounts to the backend scraper:
+
+```typescript
+const response = await fetch('/api/scrape-followers', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    accounts: usernames, // From source_profiles
+    targetGender: 'male'
+  })
+})
+```
+
+## Multi-Tenant Isolation
+
+### RLS Policy Example
+
+```sql
+-- Row Level Security policy for multi-tenant isolation
+CREATE POLICY "Isolate source_profiles by base_id"
+  ON source_profiles
+  FOR ALL
+  USING (
+    base_id = current_setting('request.headers')::json->>'x-base-id'
+  );
+
+ALTER TABLE source_profiles ENABLE ROW LEVEL SECURITY;
+```
+
+### Context-Aware Queries
+
+```typescript
+import { createSupabaseClientWithContext } from '@/lib/supabase'
+
+// Client automatically includes base_id in headers
+const client = createSupabaseClientWithContext(baseId)
+
+// This query is automatically filtered by RLS
+const { data } = await client
+  .from('source_profiles')
+  .select('*')
+// Returns only profiles with matching base_id
+```
+
+## Best Practices
+
+<Check>**Validate usernames before insertion** - Use `isValidInstagramUsername()` to prevent invalid data</Check>
+
+<Check>**Handle URL inputs gracefully** - Extract usernames from full Instagram URLs</Check>
+
+<Check>**Display user-friendly errors** - Show specific error messages for duplicate usernames</Check>
+
+<Warning>**Always filter by base_id** - Ensure multi-tenant isolation in all queries</Warning>
+
+<Warning>**Use unique constraint** - Prevent duplicate source profiles within the same base</Warning>
+
+## Error Handling
+
+### Duplicate Username
+
+```typescript
+const { error } = await client
+  .from('source_profiles')
+  .insert({ username, base_id: baseId })
+
+if (error?.code === '23505') {
+  console.error('Username already exists in source profiles')
+  toast.error('This Instagram account is already in your source list')
+}
+```
+
+### Invalid Username
+
+```typescript
+if (!isValidInstagramUsername(username)) {
+  toast.error('Invalid Instagram username. Use only letters, numbers, dots, and underscores.')
+  return
+}
+```
+
+### Missing base_id
+
+```typescript
+if (!baseId) {
+  console.error('No active job found. Cannot add source profile.')
+  toast.error('Please create a scraping job first')
+  return
+}
+```
+
+## Sample Data
+
+```sql
+INSERT INTO source_profiles (username, base_id) VALUES
+  ('taylorswift', 'appXYZ123'),
+  ('arianagrande', 'appXYZ123'),
+  ('selenagomez', 'appXYZ123'),
+  ('beyonce', 'appXYZ123'),
+  ('kimkardashian', 'appXYZ123');
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Scraping Workflow" icon="arrows-rotate" href="/features/scraping-jobs">
+    Learn how scraping uses source profiles
+  </Card>
+  
+  <Card title="Global Usernames" icon="at" href="/database/global-usernames">
+    See where scraped followers are stored
+  </Card>
+</CardGroup>

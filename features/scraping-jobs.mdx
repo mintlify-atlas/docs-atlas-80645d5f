@@ -1,0 +1,404 @@
+---
+title: Multi-Tenant Scraping Jobs
+description: Create and manage isolated scraping campaigns for multiple influencers across Instagram, TikTok, Threads, and X
+icon: briefcase
+---
+
+## Overview
+
+The Scraping Jobs system enables you to manage multiple independent scraping campaigns simultaneously. Each job represents a complete scraping operation for a specific influencer on a specific platform, with full data isolation powered by the `base_id` multi-tenant architecture.
+
+<CardGroup cols={2}>
+  <Card title="Multi-Platform Support" icon="globe">
+    Scrape followers from Instagram, TikTok, Threads, and X (Twitter) with platform-specific optimizations
+  </Card>
+  <Card title="Data Isolation" icon="shield">
+    Each job maintains separate data using unique base_id identifiers for complete tenant isolation
+  </Card>
+  <Card title="Real-Time Statistics" icon="chart-line">
+    Track usernames, assignments, and scrape results in real-time for each job
+  </Card>
+  <Card title="Status Management" icon="toggle-on">
+    Control job lifecycle with active, paused, and archived states
+  </Card>
+</CardGroup>
+
+## Job Architecture
+
+### Database Schema
+
+Scraping jobs are stored in the `scraping_jobs` table with the following structure:
+
+```typescript
+interface ScrapingJob {
+  job_id: string;              // Unique job identifier (UUID)
+  influencer_name: string;      // Name of the influencer being scraped
+  platform: Platform;           // 'instagram' | 'threads' | 'tiktok' | 'x'
+  airtable_base_id: string;    // Airtable base URL for VA distribution
+  base_id: string;             // Multi-tenant isolation key (source of truth)
+  num_vas: number | null;      // Number of virtual assistants
+  status: JobStatus;           // 'active' | 'paused' | 'archived'
+  created_at: string;
+  updated_at: string | null;
+}
+```
+
+Source: `types/scraping-jobs.ts:19-29`
+
+### Multi-Tenant Isolation
+
+Every database operation uses the `base_id` to ensure data isolation:
+
+```typescript
+// Jobs provide the base_id to all related data
+const { baseId } = useBase();  // Retrieved from active job
+
+// All queries include base_id filtering
+const { data } = await supabase
+  .from('global_usernames')
+  .select('*')
+  .eq('base_id', baseId)  // Ensures data isolation
+  .eq('used', false);
+```
+
+Source: `lib/scraping-jobs.ts:250-268`
+
+## Creating a Scraping Job
+
+### Step-by-Step Workflow
+
+<Steps>
+  <Step title="Fill Job Configuration">
+    Enter the influencer name, select platform (Instagram, TikTok, Threads, or X), and specify number of VAs
+    
+    ```typescript
+    // Component: configure-job-card.tsx
+    interface CreateScrapingJobInput {
+      influencer_name: string;
+      platform: Platform;
+      num_vas?: number;
+      status?: JobStatus;
+    }
+    ```
+    
+    Source: `components/configure-job-card.tsx:17-50`
+  </Step>
+  
+  <Step title="Submit Job Creation">
+    The system creates a new job record in Supabase:
+    
+    ```typescript
+    export async function createScrapingJob(
+      input: CreateScrapingJobInput
+    ): Promise<ScrapingJob | null> {
+      const { data, error } = await supabase
+        .from('scraping_jobs')
+        .insert({
+          influencer_name: input.influencer_name,
+          platform: input.platform,
+          airtable_base_id: input.airtable_base_id,
+          num_vas: input.num_vas || null,
+          status: input.status || 'active',
+          base_id: input.airtable_base_id  // Multi-tenant isolation key
+        })
+        .select()
+        .single();
+      
+      return data;
+    }
+    ```
+    
+    Source: `lib/scraping-jobs.ts:20-50`
+  </Step>
+  
+  <Step title="Link Airtable Base">
+    Required non-skippable dialog to connect the job to an Airtable workspace:
+    
+    - Navigate to [AIVS Scraper Workspace](https://airtable.com/workspaces/wspQtCYFXE7T72rkW)
+    - Create new base: "Build an app on your own"
+    - Rename to: `{influencer}'s {platform} Campaign`
+    - Paste the Airtable URL
+    
+    Source: `components/airtable-link-dialog.tsx:85-108`
+  </Step>
+  
+  <Step title="Setup Progress">
+    3-second animated progress bar confirms job creation and displays success message before redirecting to dashboard
+    
+    Source: README.md:267-272
+  </Step>
+</Steps>
+
+## Active Job Selection
+
+### BaseContext Provider
+
+The application uses React Context to manage the active job globally:
+
+```typescript
+/**
+ * Fetch the active scraping job from Supabase
+ * 
+ * Priority:
+ * 1. Job where status = 'active'
+ * 2. Most recent job (fallback)
+ */
+export async function getActiveJob(): Promise<ScrapingJob | null> {
+  // First, try to get an active job
+  const { data: activeJobs } = await supabase
+    .from('scraping_jobs')
+    .select('*')
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (activeJobs && activeJobs.length > 0) {
+    return activeJobs[0];
+  }
+
+  // Fallback: get the most recent job
+  const { data: recentJobs } = await supabase
+    .from('scraping_jobs')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  return recentJobs && recentJobs.length > 0 ? recentJobs[0] : null;
+}
+```
+
+Source: `lib/scraping-jobs.ts:159-195`
+
+### Using Active Job in Components
+
+```typescript
+import { useBase } from '@/contexts/base-context';
+
+function MyComponent() {
+  const { baseId, activeJob, isLoading } = useBase();
+  
+  if (isLoading) return <Spinner />;
+  if (!baseId) return <Error message="No active job" />;
+  
+  // Use baseId in all API calls
+  const result = await apiPost('/api/scrape-followers', baseId, {
+    accounts: usernames
+  });
+}
+```
+
+Source: `contexts/base-context.tsx:223-237`
+
+## Job Statistics
+
+### Real-Time Metrics
+
+Each job displays live statistics using `base_id` for accurate counts:
+
+<Card title="Job Statistics" icon="chart-bar">
+  ```typescript
+  interface JobStatistics {
+    totalUsernames: number;       // All scraped usernames for this job
+    usedUsernames: number;        // Usernames assigned to campaigns
+    availableUsernames: number;   // Unused usernames ready for assignment
+    totalAssignments: number;     // Total VA assignments created
+    totalScrapeResults: number;   // Raw scrape results count
+  }
+  ```
+  
+  Source: `types/scraping-jobs.ts:62-68`
+</Card>
+
+### Fetching Statistics by Base ID
+
+```typescript
+export async function getJobStatisticsByBaseId(
+  baseId: string
+): Promise<JobStatistics | null> {
+  // Get available usernames count (used = false)
+  const { count: availableUsernames } = await supabase
+    .from('global_usernames')
+    .select('*', { count: 'exact', head: true })
+    .eq('base_id', baseId)
+    .eq('used', false);
+
+  // Get used usernames count
+  const { count: usedUsernames } = await supabase
+    .from('global_usernames')
+    .select('*', { count: 'exact', head: true })
+    .eq('base_id', baseId)
+    .eq('used', true);
+
+  // Get total usernames count
+  const { count: totalUsernames } = await supabase
+    .from('global_usernames')
+    .select('*', { count: 'exact', head: true })
+    .eq('base_id', baseId);
+
+  return {
+    totalUsernames: totalUsernames || 0,
+    usedUsernames: usedUsernames || 0,
+    availableUsernames: availableUsernames || 0,
+    totalAssignments: totalAssignments || 0,
+    totalScrapeResults: totalScrapeResults || 0
+  };
+}
+```
+
+Source: `lib/scraping-jobs.ts:248-293`
+
+## Job Status Management
+
+### Status Types
+
+<CardGroup cols={3}>
+  <Card title="Active" icon="circle-check" color="#16a34a">
+    Job is currently running and available for scraping operations
+  </Card>
+  <Card title="Paused" icon="circle-pause" color="#ea580c">
+    Job is temporarily suspended but data remains accessible
+  </Card>
+  <Card title="Archived" icon="archive" color="#64748b">
+    Job is completed or deprecated, hidden from active lists
+  </Card>
+</CardGroup>
+
+### Status Update Functions
+
+```typescript
+// Update job status
+export async function updateJobStatus(
+  jobId: string,
+  status: JobStatus
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('scraping_jobs')
+    .update({ status })
+    .eq('job_id', jobId);
+    
+  return !error;
+}
+
+// Convenience methods
+export async function pauseJob(jobId: string): Promise<boolean> {
+  return updateJobStatus(jobId, 'paused');
+}
+
+export async function activateJob(jobId: string): Promise<boolean> {
+  return updateJobStatus(jobId, 'active');
+}
+
+export async function archiveJob(jobId: string): Promise<boolean> {
+  return updateJobStatus(jobId, 'archived');
+}
+```
+
+Source: `lib/scraping-jobs.ts:236-576`
+
+## Platform Configuration
+
+### Supported Platforms
+
+```typescript
+export const PLATFORM_CONFIG: Record<Platform, {
+  label: string;
+  icon: string;
+  color: string;
+}> = {
+  instagram: {
+    label: 'Instagram',
+    icon: '📷',
+    color: '#E4405F'
+  },
+  threads: {
+    label: 'Threads',
+    icon: '🧵',
+    color: '#000000'
+  },
+  tiktok: {
+    label: 'TikTok',
+    icon: '🎵',
+    color: '#000000'
+  },
+  x: {
+    label: 'X (Twitter)',
+    icon: '𝕏',
+    color: '#000000'
+  }
+};
+```
+
+Source: `types/scraping-jobs.ts:132-157`
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always use base_id from context">
+    Never hardcode or cache `base_id` values. Always retrieve from `useBase()` hook to ensure correct job isolation:
+    
+    ```typescript
+    // ✅ Correct
+    const { baseId } = useBase();
+    await apiPost('/api/scrape-followers', baseId, data);
+    
+    // ❌ Wrong
+    const hardcodedBaseId = 'app1234';
+    await apiPost('/api/scrape-followers', hardcodedBaseId, data);
+    ```
+  </Accordion>
+  
+  <Accordion title="Check for active job before operations">
+    Always verify a job is active before performing scraping or assignment operations:
+    
+    ```typescript
+    const { baseId, activeJob } = useBase();
+    
+    if (!baseId) {
+      toast({
+        title: "No active job",
+        description: "Please select an active scraping job first",
+        variant: "destructive"
+      });
+      return;
+    }
+    ```
+    
+    Source: `components/payments-table.tsx:98-105`
+  </Accordion>
+  
+  <Accordion title="Use job statistics for capacity planning">
+    Monitor `availableUsernames` before creating campaigns to ensure sufficient profiles:
+    
+    ```typescript
+    const stats = await getJobStatisticsByBaseId(baseId);
+    const required = 14400;  // 180 profiles × 80 VAs
+    
+    if (stats.availableUsernames < required) {
+      toast({
+        title: "Not enough profiles",
+        description: "Please scrape more profiles first"
+      });
+      return;
+    }
+    ```
+    
+    Source: `components/payments-table.tsx:212-233`
+  </Accordion>
+</AccordionGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Campaign Management" icon="calendar" href="/features/campaign-management">
+    Learn how to create daily campaigns from scraping jobs
+  </Card>
+  <Card title="VA Distribution" icon="users" href="/features/va-distribution">
+    Understand how profiles are distributed to virtual assistants
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/client/scraping-jobs">
+    Complete API documentation for job management
+  </Card>
+  <Card title="Database Schema" icon="database" href="/database/overview">
+    Explore the complete database structure
+  </Card>
+</CardGroup>

@@ -1,0 +1,389 @@
+---
+title: 'POST /api/distribute/{campaign_id}'
+description: 'Distribute campaign profiles across 80 VA tables'
+icon: 'users'
+---
+
+## Endpoint
+
+<CodeGroup>
+```bash cURL
+curl -X POST http://localhost:5001/api/distribute/550e8400-e29b-41d4-a716-446655440000 \
+  -H "X-Base-Id: your-base-id" \
+  -H "Content-Type: application/json"
+```
+
+```typescript TypeScript
+import { apiPost } from '@/lib/api'
+import { useBase } from '@/contexts/base-context'
+
+const { baseId } = useBase()
+const campaignId = '550e8400-e29b-41d4-a716-446655440000'
+
+const response = await apiPost(`/api/distribute/${campaignId}`, baseId)
+```
+
+```javascript JavaScript
+const campaignId = '550e8400-e29b-41d4-a716-446655440000'
+
+const response = await fetch(
+  `http://localhost:5001/api/distribute/${campaignId}`,
+  {
+    method: 'POST',
+    headers: {
+      'X-Base-Id': 'your-base-id',
+      'Content-Type': 'application/json'
+    }
+  }
+)
+
+const data = await response.json()
+```
+</CodeGroup>
+
+## Description
+
+Distributes the 14,400 profiles from a campaign evenly across 80 VA tables. This is the second step in the campaign workflow, following `/api/daily-selection`.
+
+This endpoint:
+1. Retrieves the campaign by ID
+2. Fetches all 14,400 profiles from the campaign
+3. Distributes profiles evenly (180 profiles per VA)
+4. Inserts assignments into `daily_assignments` table
+5. Updates campaign status
+
+<Info>
+  Each VA receives exactly 180 profiles, ensuring balanced workload distribution.
+</Info>
+
+## Request Headers
+
+<ParamField header="X-Base-Id" type="string" required>
+  Airtable base identifier for multi-tenant isolation
+</ParamField>
+
+<ParamField header="Content-Type" type="string" default="application/json">
+  Must be `application/json`
+</ParamField>
+
+## Path Parameters
+
+<ParamField path="campaign_id" type="string" required>
+  UUID of the campaign to distribute (from `/api/daily-selection` response)
+  
+  **Example:** `550e8400-e29b-41d4-a716-446655440000`
+</ParamField>
+
+## Request Body
+
+This endpoint does not require a request body.
+
+## Response Fields
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if distribution completed successfully
+</ResponseField>
+
+<ResponseField name="campaign_id" type="string" required>
+  UUID of the distributed campaign
+</ResponseField>
+
+<ResponseField name="va_tables" type="number" required>
+  Number of VA tables (always 80)
+</ResponseField>
+
+<ResponseField name="profiles_per_table" type="number" required>
+  Profiles assigned to each VA (always 180)
+</ResponseField>
+
+## Response Example
+
+### Success Response (200 OK)
+
+```json
+{
+  "success": true,
+  "campaign_id": "550e8400-e29b-41d4-a716-446655440000",
+  "va_tables": 80,
+  "profiles_per_table": 180
+}
+```
+
+### Error Response (404 Not Found)
+
+```json
+{
+  "success": false,
+  "error": "Campaign not found",
+  "details": {
+    "campaign_id": "550e8400-e29b-41d4-a716-446655440000"
+  }
+}
+```
+
+### Error Response (400 Bad Request)
+
+```json
+{
+  "success": false,
+  "error": "Campaign already distributed",
+  "details": {
+    "campaign_id": "550e8400-e29b-41d4-a716-446655440000",
+    "status": "success"
+  }
+}
+```
+
+### Error Response (401 Unauthorized)
+
+```json
+{
+  "success": false,
+  "error": "X-Base-Id header is required"
+}
+```
+
+### Error Response (500 Internal Server Error)
+
+```json
+{
+  "success": false,
+  "error": "Distribution failed",
+  "details": {
+    "message": "Database insertion error",
+    "va_table": 45,
+    "profiles_assigned": 8100
+  }
+}
+```
+
+## Database Schema
+
+### daily_assignments Table
+
+Stores profile-to-VA assignments:
+
+```sql
+CREATE TABLE daily_assignments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  campaign_id UUID REFERENCES campaigns(campaign_id),
+  username TEXT,
+  va_table_number INTEGER,
+  assigned_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+**Indexes:**
+- `campaign_id` - For querying assignments by campaign
+- `va_table_number` - For querying assignments by VA
+- `username` - For querying specific profile assignments
+
+## Distribution Logic
+
+Profiles are distributed using a round-robin algorithm:
+
+```typescript
+// Pseudo-code for distribution logic
+const distributeProfiles = (profiles: string[], vaCount: number) => {
+  const profilesPerVA = Math.floor(profiles.length / vaCount) // 180
+  const assignments = []
+
+  for (let vaIndex = 0; vaIndex < vaCount; vaIndex++) {
+    const start = vaIndex * profilesPerVA
+    const end = start + profilesPerVA
+    const vaProfiles = profiles.slice(start, end)
+
+    for (const username of vaProfiles) {
+      assignments.push({
+        campaign_id: campaignId,
+        username: username,
+        va_table_number: vaIndex + 1 // 1-80
+      })
+    }
+  }
+
+  return assignments
+}
+```
+
+**Distribution Breakdown:**
+- **Total Profiles:** 14,400
+- **VA Count:** 80
+- **Profiles per VA:** 14,400 ÷ 80 = 180
+- **VA Table Numbers:** 1 through 80
+
+## Campaign Workflow
+
+This endpoint is the second step in the campaign workflow:
+
+```typescript
+const runCampaignWorkflow = async () => {
+  // Step 1: Create campaign and select profiles
+  const selectionResponse = await apiPost('/api/daily-selection', baseId)
+  const { campaign_id } = selectionResponse
+
+  // Step 2: Distribute to VA tables
+  const distributeResponse = await apiPost(
+    `/api/distribute/${campaign_id}`,
+    baseId
+  )
+
+  if (!distributeResponse.success) {
+    throw new Error('Distribution failed')
+  }
+
+  // Step 3: Sync to Airtable
+  const syncResponse = await apiPost(
+    `/api/airtable-sync/${campaign_id}`,
+    baseId
+  )
+}
+```
+
+## Querying VA Assignments
+
+Query the `daily_assignments` table to view distribution:
+
+```sql
+-- Get assignments for specific VA table
+SELECT username, assigned_at
+FROM daily_assignments
+WHERE campaign_id = '550e8400-e29b-41d4-a716-446655440000'
+  AND va_table_number = 1
+ORDER BY assigned_at;
+
+-- Get assignment count per VA
+SELECT 
+  va_table_number,
+  COUNT(*) as profile_count
+FROM daily_assignments
+WHERE campaign_id = '550e8400-e29b-41d4-a716-446655440000'
+GROUP BY va_table_number
+ORDER BY va_table_number;
+
+-- Verify even distribution
+SELECT 
+  MIN(profile_count) as min_profiles,
+  MAX(profile_count) as max_profiles,
+  AVG(profile_count) as avg_profiles
+FROM (
+  SELECT va_table_number, COUNT(*) as profile_count
+  FROM daily_assignments
+  WHERE campaign_id = '550e8400-e29b-41d4-a716-446655440000'
+  GROUP BY va_table_number
+) AS va_counts;
+```
+
+## Performance Considerations
+
+<Warning>
+  Distribution involves inserting 14,400 rows into `daily_assignments` table.
+  
+  Expect 10-30 seconds for completion depending on database performance.
+</Warning>
+
+**Optimization Tips:**
+- Use batch inserts (insert 100-500 rows at a time)
+- Enable database connection pooling
+- Index `campaign_id` and `va_table_number` columns
+- Use prepared statements to reduce query parsing overhead
+
+## Error Handling
+
+Common error scenarios:
+
+### Campaign Not Found
+
+**Cause:** Invalid campaign_id or campaign doesn't exist
+
+**Solution:** Verify the campaign_id from `/api/daily-selection` response
+
+### Campaign Already Distributed
+
+**Cause:** Attempting to distribute a campaign twice
+
+**Solution:** Check campaign status before distributing
+
+### Partial Distribution Failure
+
+**Cause:** Database error during batch insert
+
+**Solution:** 
+1. Check database logs for specific error
+2. Verify database has sufficient resources
+3. Retry distribution (idempotent operation)
+
+## Monitoring Distribution
+
+Check distribution progress:
+
+```sql
+-- Count assignments created so far
+SELECT COUNT(*) as assignments_created
+FROM daily_assignments
+WHERE campaign_id = '550e8400-e29b-41d4-a716-446655440000';
+
+-- Expected: 14,400 assignments
+
+-- Check if all VAs received assignments
+SELECT COUNT(DISTINCT va_table_number) as vas_with_assignments
+FROM daily_assignments
+WHERE campaign_id = '550e8400-e29b-41d4-a716-446655440000';
+
+-- Expected: 80 VAs
+```
+
+## VA Table Naming Convention
+
+VA tables are numbered 1 through 80:
+
+- **Table 1** - VA #1
+- **Table 2** - VA #2
+- ...
+- **Table 80** - VA #80
+
+This numbering matches the Airtable table naming convention used in `/api/airtable-sync`.
+
+## Transaction Safety
+
+Distribution is performed in a database transaction:
+
+```typescript
+// Pseudo-code for transactional distribution
+const distributeWithTransaction = async (campaignId: string) => {
+  const client = await pool.connect()
+  
+  try {
+    await client.query('BEGIN')
+    
+    // Insert all assignments
+    await insertAssignments(client, assignments)
+    
+    // Update campaign status
+    await updateCampaignStatus(client, campaignId, 'pending')
+    
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}
+```
+
+## Related Endpoints
+
+<CardGroup cols={2}>
+  <Card title="Daily Selection" icon="calendar-days" href="/api/daily-selection">
+    Create campaign before distribution
+  </Card>
+  
+  <Card title="Airtable Sync" icon="cloud-arrow-up" href="/api/airtable-sync">
+    Sync distributed profiles to Airtable
+  </Card>
+  
+  <Card title="Cleanup" icon="trash" href="/api/cleanup">
+    Clean up old campaign assignments
+  </Card>
+</CardGroup>

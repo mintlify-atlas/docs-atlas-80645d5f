@@ -1,0 +1,485 @@
+---
+title: 'Vercel Deployment'
+description: 'Step-by-step guide to deploy the Instagram Marketing Automation Platform on Vercel'
+icon: 'triangle'
+---
+
+## Overview
+
+Vercel provides the fastest and easiest way to deploy Next.js applications with zero configuration. This guide walks through deploying both new and existing projects.
+
+<Info>
+  Deployment typically takes 2-5 minutes from start to finish.
+</Info>
+
+## Prerequisites
+
+Before deploying, ensure you have:
+
+<Steps>
+  <Step title="Vercel Account">
+    Create a free account at [vercel.com](https://vercel.com)
+  </Step>
+  
+  <Step title="Git Repository">
+    Push your code to GitHub, GitLab, or Bitbucket
+  </Step>
+  
+  <Step title="Environment Variables Ready">
+    Prepare all production environment variables (see [Production Checklist](/deployment/production-checklist))
+  </Step>
+  
+  <Step title="Supabase Database">
+    Have a production Supabase project with all tables created
+  </Step>
+</Steps>
+
+## Deployment Methods
+
+<Tabs>
+  <Tab title="Vercel Dashboard">
+    ### Deploy via Vercel Dashboard
+    
+    <Steps>
+      <Step title="Import Project">
+        1. Go to [vercel.com/new](https://vercel.com/new)
+        2. Click "Import Project"
+        3. Select your Git repository
+        4. Authorize Vercel to access your repository
+      </Step>
+      
+      <Step title="Configure Project">
+        Vercel automatically detects Next.js:
+        
+        ```bash
+        Framework Preset: Next.js
+        Build Command: npm run build
+        Output Directory: .next
+        Install Command: npm install
+        ```
+        
+        <Warning>
+          Do not change these settings unless you have custom requirements.
+        </Warning>
+      </Step>
+      
+      <Step title="Add Environment Variables">
+        Click "Environment Variables" and add all variables:
+        
+        ```bash
+        NEXT_PUBLIC_APP_URL=https://your-domain.vercel.app
+        NEXT_PUBLIC_API_URL=https://your-backend-api.com
+        NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+        NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbG...
+        NEXT_PUBLIC_USERNAME=your-username
+        NEXT_PUBLIC_PASSWORD=your-password
+        NEXT_PUBLIC_OTP=123456
+        NEXT_PUBLIC_DAILY_SELECTION_TARGET=14400
+        NEXT_PUBLIC_DELETE_PASSWORD=delete123
+        ```
+        
+        <Tip>
+          Use the "Paste .env" option to bulk import all variables at once.
+        </Tip>
+      </Step>
+      
+      <Step title="Deploy">
+        Click "Deploy" and wait 2-5 minutes for the build to complete.
+      </Step>
+    </Steps>
+  </Tab>
+  
+  <Tab title="Vercel CLI">
+    ### Deploy via CLI
+    
+    <Steps>
+      <Step title="Install Vercel CLI">
+        ```bash
+        npm install -g vercel
+        ```
+      </Step>
+      
+      <Step title="Login to Vercel">
+        ```bash
+        vercel login
+        ```
+        
+        Follow the authentication prompts in your browser.
+      </Step>
+      
+      <Step title="Deploy to Production">
+        ```bash
+        # From your project root
+        cd client
+        
+        # Deploy to production
+        vercel --prod
+        ```
+        
+        <Note>
+          First deployment will prompt you to configure the project settings.
+        </Note>
+      </Step>
+      
+      <Step title="Set Environment Variables">
+        ```bash
+        # Add environment variables via CLI
+        vercel env add NEXT_PUBLIC_APP_URL
+        vercel env add NEXT_PUBLIC_API_URL
+        vercel env add NEXT_PUBLIC_SUPABASE_URL
+        vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY
+        # ... add all other variables
+        ```
+        
+        Or upload from `.env.local`:
+        
+        ```bash
+        vercel env pull .env.local
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+  
+  <Tab title="Git Integration">
+    ### Automatic Deployments
+    
+    Once connected, Vercel automatically deploys:
+    
+    <CardGroup cols={2}>
+      <Card title="Production Deployment" icon="rocket">
+        Every push to `main` or `master` branch triggers a production deployment
+      </Card>
+      <Card title="Preview Deployment" icon="eye">
+        Every pull request gets a unique preview URL for testing
+      </Card>
+    </CardGroup>
+    
+    ### Configure Git Integration
+    
+    <Steps>
+      <Step title="Connect Repository">
+        In your Vercel project settings:
+        1. Go to "Git" tab
+        2. Connect your GitHub/GitLab/Bitbucket repository
+      </Step>
+      
+      <Step title="Set Production Branch">
+        ```bash
+        Production Branch: main
+        ```
+      </Step>
+      
+      <Step title="Configure Deploy Hooks">
+        Enable automatic deployments:
+        - ✅ Deploy on push to production branch
+        - ✅ Create preview deployments for pull requests
+        - ✅ Auto-cancel redundant builds
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Build Configuration
+
+### Build Commands
+
+The `package.json` defines the build process:
+
+```json package.json
+{
+  "scripts": {
+    "dev": "next dev",
+    "build": "next lint && next build",
+    "start": "next start",
+    "lint": "next lint",
+    "type-check": "tsc --noEmit"
+  }
+}
+```
+
+<Info>
+  The build script runs linting before building to catch errors early.
+</Info>
+
+### Next.js Configuration
+
+The `next.config.mjs` is optimized for production:
+
+```javascript next.config.mjs
+const nextConfig = {
+  output: 'standalone',
+  images: {
+    unoptimized: true,
+  },
+};
+```
+
+**Configuration Explained:**
+
+- `output: 'standalone'` - Creates self-contained build (smaller deployment size)
+- `images.unoptimized: true` - Disables Image Optimization API (reduces costs)
+
+## Environment Variables
+
+### Required Production Variables
+
+<Warning>
+  All environment variables prefixed with `NEXT_PUBLIC_` are exposed to the browser. Never use them for secrets.
+</Warning>
+
+<AccordionGroup>
+  <Accordion title="App Configuration">
+    ```bash
+    NEXT_PUBLIC_APP_URL=https://your-app.vercel.app
+    NEXT_PUBLIC_API_URL=https://your-backend-api.com
+    ```
+    
+    <Tip>
+      Update `NEXT_PUBLIC_APP_URL` with your actual Vercel domain after first deployment.
+    </Tip>
+  </Accordion>
+  
+  <Accordion title="Supabase Configuration">
+    ```bash
+    NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+    NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+    ```
+    
+    Get these from your Supabase project settings → API.
+  </Accordion>
+  
+  <Accordion title="Authentication">
+    ```bash
+    NEXT_PUBLIC_USERNAME=admin
+    NEXT_PUBLIC_PASSWORD=secure-password-here
+    NEXT_PUBLIC_OTP=123456
+    NEXT_PUBLIC_DELETE_PASSWORD=delete-password-here
+    ```
+    
+    <Warning>
+      Use strong passwords in production. Consider implementing proper authentication with NextAuth.js or Supabase Auth.
+    </Warning>
+  </Accordion>
+  
+  <Accordion title="Campaign Settings">
+    ```bash
+    NEXT_PUBLIC_DAILY_SELECTION_TARGET=14400
+    ```
+    
+    Defines the daily profile selection target (14,400 = 80 VAs × 180 profiles).
+  </Accordion>
+</AccordionGroup>
+
+### Managing Environment Variables
+
+<Tabs>
+  <Tab title="Vercel Dashboard">
+    1. Go to your project on Vercel
+    2. Click "Settings" → "Environment Variables"
+    3. Add variables for each environment:
+       - Production
+       - Preview
+       - Development
+    
+    <Tip>
+      Use different values for Preview and Production environments to test safely.
+    </Tip>
+  </Tab>
+  
+  <Tab title="Vercel CLI">
+    ```bash
+    # Add a variable to all environments
+    vercel env add VARIABLE_NAME
+    
+    # Add to specific environment
+    vercel env add VARIABLE_NAME production
+    
+    # List all variables
+    vercel env ls
+    
+    # Remove a variable
+    vercel env rm VARIABLE_NAME
+    ```
+  </Tab>
+</Tabs>
+
+## Custom Domain Setup
+
+<Steps>
+  <Step title="Add Domain">
+    1. Go to project "Settings" → "Domains"
+    2. Click "Add Domain"
+    3. Enter your custom domain (e.g., `app.yourdomain.com`)
+  </Step>
+  
+  <Step title="Configure DNS">
+    Add DNS records at your domain registrar:
+    
+    ```bash
+    # For subdomain (app.yourdomain.com)
+    Type: CNAME
+    Name: app
+    Value: cname.vercel-dns.com
+    
+    # For apex domain (yourdomain.com)
+    Type: A
+    Name: @
+    Value: 76.76.21.21
+    ```
+  </Step>
+  
+  <Step title="Verify Domain">
+    Vercel automatically verifies DNS configuration and issues SSL certificate (5-10 minutes).
+  </Step>
+  
+  <Step title="Update Environment Variables">
+    Update `NEXT_PUBLIC_APP_URL` with your custom domain:
+    
+    ```bash
+    NEXT_PUBLIC_APP_URL=https://app.yourdomain.com
+    ```
+  </Step>
+</Steps>
+
+## Deployment Outputs
+
+### Build Logs
+
+Monitor build progress in the Vercel dashboard:
+
+```bash
+[14:23:45.123] Cloning repository...
+[14:23:46.456] Installing dependencies...
+[14:24:12.789] Running "npm run build"
+[14:24:15.123] > next lint && next build
+[14:24:18.456] Linting and checking validity of types...
+[14:24:25.789] Creating an optimized production build...
+[14:24:45.123] Compiled successfully
+[14:24:45.456] Build completed
+[14:24:46.789] Deploying outputs...
+[14:24:50.123] Deployment completed
+```
+
+### Deployment URL
+
+After successful deployment, you'll receive:
+
+- **Production URL**: `https://your-project.vercel.app`
+- **Preview URLs**: `https://your-project-git-branch.vercel.app`
+- **Custom Domain**: `https://your-custom-domain.com` (if configured)
+
+## Post-Deployment Verification
+
+<Steps>
+  <Step title="Test Application">
+    1. Visit your deployment URL
+    2. Navigate to `/callum` route
+    3. Test authentication with credentials
+    4. Verify dashboard loads correctly
+  </Step>
+  
+  <Step title="Check API Connection">
+    Test backend API connectivity:
+    - Add source profiles
+    - Run "Find Accounts" workflow
+    - Monitor for errors in browser console
+  </Step>
+  
+  <Step title="Verify Database Connection">
+    1. Check Supabase connection in browser network tab
+    2. Verify data loads from tables
+    3. Test create/read operations
+  </Step>
+  
+  <Step title="Monitor Performance">
+    Use Vercel Analytics to track:
+    - Page load times
+    - Core Web Vitals
+    - Error rates
+  </Step>
+</Steps>
+
+## Rollback and Redeployment
+
+### Rollback to Previous Deployment
+
+<Steps>
+  <Step title="Navigate to Deployments">
+    Go to your project → "Deployments" tab
+  </Step>
+  
+  <Step title="Select Previous Deployment">
+    Find the working deployment and click the "..." menu
+  </Step>
+  
+  <Step title="Promote to Production">
+    Click "Promote to Production" to instantly rollback
+  </Step>
+</Steps>
+
+### Redeploy Latest Commit
+
+```bash
+# Via CLI
+vercel --prod
+
+# Or trigger via dashboard
+# Deployments → Latest → Redeploy
+```
+
+## Continuous Deployment Workflow
+
+<Steps>
+  <Step title="Development">
+    ```bash
+    # Create feature branch
+    git checkout -b feature/new-feature
+    
+    # Make changes and commit
+    git add .
+    git commit -m "Add new feature"
+    ```
+  </Step>
+  
+  <Step title="Preview Deployment">
+    ```bash
+    # Push to remote
+    git push origin feature/new-feature
+    
+    # Vercel automatically creates preview deployment
+    # URL: https://your-project-git-feature-new-feature.vercel.app
+    ```
+  </Step>
+  
+  <Step title="Code Review">
+    1. Create pull request on GitHub
+    2. Review changes and preview deployment
+    3. Test features on preview URL
+  </Step>
+  
+  <Step title="Production Deployment">
+    ```bash
+    # Merge to main branch
+    git checkout main
+    git merge feature/new-feature
+    git push origin main
+    
+    # Vercel automatically deploys to production
+    ```
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+For common deployment issues, see [Deployment Troubleshooting](/deployment/troubleshooting).
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Production Checklist" icon="list-check" href="/deployment/production-checklist">
+    Complete pre-deployment checklist
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/deployment/troubleshooting">
+    Common deployment issues
+  </Card>
+</CardGroup>

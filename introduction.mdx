@@ -1,0 +1,157 @@
+---
+title: Introduction
+description: Instagram marketing automation platform for scraping followers, managing campaigns, and distributing profiles to virtual assistants.
+---
+
+<img
+  className="block dark:hidden"
+  src="/images/hero-light.svg"
+  alt="Click Creators Scraper Client Hero Light"
+/>
+<img
+  className="hidden dark:block"
+  src="/images/hero-dark.svg"
+  alt="Click Creators Scraper Client Hero Dark"
+/>
+
+## Welcome to Click Creators Scraper Client
+
+Click Creators Scraper Client is a comprehensive Instagram marketing automation platform designed to streamline follower acquisition, campaign management, and virtual assistant (VA) coordination workflows. Built with Next.js 14 and TypeScript, it provides a modern, scalable solution for managing Instagram marketing campaigns at scale.
+
+## What is Click Creators Scraper Client?
+
+This platform automates the entire workflow of Instagram follower scraping, from initial data collection to distribution among virtual assistants:
+
+1. **Scrape Instagram followers** from source accounts using Apify integration
+2. **Filter profiles by gender** using name-based detection algorithms
+3. **Store and deduplicate** profiles in a Supabase PostgreSQL database
+4. **Create campaigns** with daily batches of unused profiles (14,400 per campaign)
+5. **Distribute to VAs** across 80 virtual assistant tables
+6. **Sync to Airtable** for easy VA access and workflow management
+7. **Manage lifecycle** with automated 7-day campaign cleanup
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Multi-Tenant Job Management" icon="briefcase">
+    Manage scraping jobs across Instagram, TikTok, Threads, and X with full tenant isolation using Supabase Row-Level Security.
+  </Card>
+  <Card title="Automated Scraping" icon="robot">
+    Automated follower scraping with gender-based filtering powered by Apify and custom detection algorithms.
+  </Card>
+  <Card title="Campaign Lifecycle" icon="calendar">
+    Complete campaign creation and lifecycle management supporting 14,400 profiles per campaign with automated cleanup.
+  </Card>
+  <Card title="VA Distribution" icon="users">
+    Intelligent distribution system that assigns profiles to 80 virtual assistants via Airtable integration.
+  </Card>
+  <Card title="Real-Time Tracking" icon="chart-line">
+    Real-time progress tracking and status monitoring across all scraping and distribution operations.
+  </Card>
+  <Card title="Source Management" icon="database">
+    Source profile management with automatic deduplication to ensure data quality and prevent duplicates.
+  </Card>
+</CardGroup>
+
+## Platform Capabilities
+
+### Daily Metrics
+
+- **Daily Target:** 14,400 unique male profiles per campaign
+- **VA Count:** 80 virtual assistants
+- **Profiles per VA:** 180 profiles per day
+- **Campaign Lifecycle:** 7 days
+- **Total Weekly Capacity:** 1.008M profiles
+
+### Supported Platforms
+
+The platform supports scraping and campaign management across multiple social media platforms:
+
+- **Instagram** - Primary platform with full feature support
+- **TikTok** - Full scraping and campaign capabilities
+- **Threads** - Integrated scraping workflow
+- **X (Twitter)** - Complete job management support
+
+## Technology Stack
+
+<CardGroup cols={2}>
+  <Card title="Frontend" icon="browser">
+    Next.js 14 (App Router), TypeScript, Tailwind CSS, ShadCN UI components built on Radix UI primitives
+  </Card>
+  <Card title="Backend" icon="server">
+    Flask API (Python), Apify for Instagram scraping, Supabase PostgreSQL database, Airtable API
+  </Card>
+  <Card title="Database" icon="database">
+    Supabase PostgreSQL with Row Level Security (RLS) and real-time subscriptions for multi-tenant isolation
+  </Card>
+  <Card title="Integrations" icon="plug">
+    Apify Actor for scraping, Airtable for VA workspace, Supabase for data persistence and auth
+  </Card>
+</CardGroup>
+
+## Use Cases
+
+### Marketing Teams
+Automate Instagram follower acquisition and distribute leads to your virtual assistant team for engagement campaigns.
+
+### Influencer Agencies
+Manage multiple influencer campaigns with isolated data streams and dedicated VA assignments per client.
+
+### Growth Hackers
+Scale your Instagram growth operations with automated scraping, filtering, and distribution workflows.
+
+### VA Coordinators
+Streamline virtual assistant management with automated profile distribution and Airtable-based task tracking.
+
+## Quick Navigation
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running in 5 minutes with our step-by-step guide
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Complete installation and environment setup instructions
+  </Card>
+  <Card title="Core Features" icon="star" href="/features/scraping-jobs">
+    Explore the platform's core capabilities and workflows
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Complete API documentation for all backend endpoints
+  </Card>
+</CardGroup>
+
+## Architecture Overview
+
+The platform follows a modern full-stack architecture:
+
+```
+Source Profiles (Instagram IDs)
+        ↓
+   Apify Scraper (Extract Followers)
+        ↓
+   Gender Detection (Filter Males)
+        ↓
+   Supabase Storage (Deduplication)
+        ↓
+   Daily Selection (14,400 profiles)
+        ↓
+   VA Distribution (80 tables × 180)
+        ↓
+   Airtable Sync (VA Access)
+```
+
+Each component is designed for scalability, reliability, and multi-tenant isolation, ensuring secure and efficient operations across multiple concurrent campaigns.
+
+## Next Steps
+
+<CardGroup cols={3}>
+  <Card title="Quickstart Guide" icon="play" href="/quickstart">
+    Start using the platform
+  </Card>
+  <Card title="Create Your First Job" icon="briefcase" href="/guides/creating-scraping-job">
+    Set up a scraping job
+  </Card>
+  <Card title="Run a Campaign" icon="flag" href="/guides/running-campaigns">
+    Launch your first campaign
+  </Card>
+</CardGroup>

@@ -1,0 +1,355 @@
+---
+title: "Supabase Client"
+description: "Supabase client creation with Row-Level Security (RLS) context for multi-tenant isolation"
+---
+
+The Supabase client module provides utilities for creating database clients with automatic multi-tenant isolation using Row-Level Security (RLS).
+
+## Overview
+
+Two client creation patterns:
+
+1. **Default client** - Shared instance without RLS context
+2. **Context client** - Instance with RLS context for multi-tenant queries
+
+---
+
+## Default Client
+
+### supabase
+
+Shared Supabase client instance for general queries.
+
+```typescript
+import { supabase } from '@/lib/supabase'
+```
+
+**Usage:**
+
+```typescript
+import { supabase } from '@/lib/supabase'
+
+const { data, error } = await supabase
+  .from('scraping_jobs')
+  .select('*')
+  .order('created_at', { ascending: false })
+```
+
+<Warning>
+The default client does **not** automatically filter by `base_id`. Use `createSupabaseClientWithContext()` for multi-tenant queries.
+</Warning>
+
+---
+
+## Context Client
+
+### createSupabaseClientWithContext
+
+Create a Supabase client with RLS context set for a specific `base_id`. This enables automatic multi-tenant data isolation at the database level.
+
+```typescript
+function createSupabaseClientWithContext(baseId: string): SupabaseClient
+```
+
+<ParamField path="baseId" type="string" required>
+  The Airtable base ID to use for RLS filtering. All queries made with this client will be automatically filtered to this base.
+</ParamField>
+
+**Returns:** A configured `SupabaseClient` instance with RLS context
+
+**Example:**
+
+```typescript
+import { createSupabaseClientWithContext } from '@/lib/supabase'
+import { useBase } from '@/contexts/BaseContext'
+
+function MyComponent() {
+  const { baseId } = useBase()
+  const supabaseClient = createSupabaseClientWithContext(baseId)
+  
+  const fetchData = async () => {
+    // This query is automatically filtered by base_id via RLS
+    const { data, error } = await supabaseClient
+      .from('global_usernames')
+      .select('*')
+      .eq('used', false)
+    
+    console.log('Available usernames:', data)
+  }
+  
+  return <button onClick={fetchData}>Fetch Data</button>
+}
+```
+
+---
+
+## How RLS Context Works
+
+When you create a client with `createSupabaseClientWithContext(baseId)`:
+
+1. The client sets the `x-base-id` header on all requests
+2. Supabase RLS policies read this header using `current_setting('request.headers')::json->>'x-base-id'`
+3. Database queries are automatically filtered by this `base_id`
+4. **No manual filtering required** - the database enforces isolation
+
+### RLS Policy Example
+
+PostgreSQL RLS policy that uses the context:
+
+```sql
+CREATE POLICY "Multi-tenant isolation for global_usernames"
+  ON global_usernames
+  FOR ALL
+  USING (
+    base_id = current_setting('request.headers')::json->>'x-base-id'
+  );
+```
+
+---
+
+## Usage Patterns
+
+### Pattern 1: React Component with Context
+
+```typescript
+import { createSupabaseClientWithContext } from '@/lib/supabase'
+import { useBase } from '@/contexts/BaseContext'
+import { useEffect, useState } from 'react'
+
+function UsernamesTable() {
+  const { baseId } = useBase()
+  const [usernames, setUsernames] = useState([])
+  
+  useEffect(() => {
+    const client = createSupabaseClientWithContext(baseId)
+    
+    client
+      .from('global_usernames')
+      .select('*')
+      .eq('used', false)
+      .then(({ data }) => setUsernames(data || []))
+  }, [baseId])
+  
+  return (
+    <div>
+      {usernames.map(u => (
+        <div key={u.id}>{u.username}</div>
+      ))}
+    </div>
+  )
+}
+```
+
+### Pattern 2: Server-Side with Active Job
+
+```typescript
+import { createSupabaseClientWithContext } from '@/lib/supabase'
+import { getActiveBaseId } from '@/lib/scraping-jobs'
+
+async function fetchUsernames() {
+  const baseId = await getActiveBaseId()
+  
+  if (!baseId) {
+    throw new Error('No active base found')
+  }
+  
+  const client = createSupabaseClientWithContext(baseId)
+  
+  const { data, error } = await client
+    .from('global_usernames')
+    .select('*')
+    .eq('used', false)
+  
+  if (error) throw error
+  return data
+}
+```
+
+### Pattern 3: API Route Handler
+
+```typescript
+import { createSupabaseClientWithContext } from '@/lib/supabase'
+import { NextRequest } from 'next/server'
+
+export async function GET(request: NextRequest) {
+  // Extract base_id from request header
+  const baseId = request.headers.get('X-Base-Id')
+  
+  if (!baseId) {
+    return Response.json({ error: 'Missing base_id' }, { status: 400 })
+  }
+  
+  const client = createSupabaseClientWithContext(baseId)
+  
+  const { data, error } = await client
+    .from('global_usernames')
+    .select('*')
+  
+  if (error) {
+    return Response.json({ error: error.message }, { status: 500 })
+  }
+  
+  return Response.json({ usernames: data })
+}
+```
+
+### Pattern 4: Realtime Subscriptions
+
+```typescript
+import { createSupabaseClientWithContext } from '@/lib/supabase'
+import { useBase } from '@/contexts/BaseContext'
+import { useEffect } from 'react'
+
+function RealtimeUpdates() {
+  const { baseId } = useBase()
+  
+  useEffect(() => {
+    const client = createSupabaseClientWithContext(baseId)
+    
+    const subscription = client
+      .channel('global_usernames_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'global_usernames'
+        },
+        (payload) => {
+          console.log('Change detected:', payload)
+        }
+      )
+      .subscribe()
+    
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [baseId])
+  
+  return <div>Listening for updates...</div>
+}
+```
+
+---
+
+## Environment Variables
+
+Required environment variables:
+
+```bash
+# .env.local
+NEXT_PUBLIC_SUPABASE_URL=https://xxxxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+<Info>
+If environment variables are missing, the client uses placeholder values for build-time compatibility. Runtime checks should handle missing credentials gracefully.
+</Info>
+
+---
+
+## Client Configuration
+
+The context client is configured with:
+
+```typescript
+{
+  global: {
+    headers: {
+      'x-base-id': baseId  // Lowercase for PostgREST normalization
+    }
+  },
+  db: {
+    schema: 'public'
+  }
+}
+```
+
+<Note>
+The header key is lowercase (`x-base-id`) to match PostgREST's header normalization behavior.
+</Note>
+
+---
+
+## Comparison: Default vs Context Client
+
+| Feature | Default Client | Context Client |
+|---------|---------------|----------------|
+| **Import** | `supabase` | `createSupabaseClientWithContext(baseId)` |
+| **RLS Filtering** | Manual | Automatic |
+| **Use Case** | Non-tenant queries | Multi-tenant queries |
+| **base_id** | Must filter manually | Injected via header |
+| **Example** | System-wide lookups | User-specific data |
+
+### When to Use Each
+
+**Use default client for:**
+- Fetching the list of scraping jobs
+- System-wide configuration
+- Non-tenant-specific queries
+
+**Use context client for:**
+- Fetching usernames for a specific base
+- Creating assignments for a specific job
+- Any query that should be isolated by `base_id`
+
+---
+
+## Error Handling
+
+```typescript
+import { createSupabaseClientWithContext } from '@/lib/supabase'
+
+const client = createSupabaseClientWithContext(baseId)
+
+const { data, error } = await client
+  .from('global_usernames')
+  .select('*')
+
+if (error) {
+  console.error('Database error:', error.message)
+  throw error
+}
+
+console.log('Data:', data)
+```
+
+---
+
+## Best Practices
+
+<Check>
+**Always use context client** for queries that should be isolated by `base_id`
+</Check>
+
+<Check>
+**Validate baseId** before creating the context client
+</Check>
+
+<Check>
+**Use TypeScript types** from `@supabase/supabase-js` for type safety
+</Check>
+
+<Warning>
+**Don't share context clients** between different base_id values - create a new client for each base
+</Warning>
+
+---
+
+## Import Path
+
+```typescript
+import {
+  supabase,                          // Default client
+  createSupabaseClientWithContext    // Context client factory
+} from '@/lib/supabase'
+```
+
+---
+
+## See Also
+
+- [Scraping Jobs API](/api/client/scraping-jobs) - Functions that use these clients
+- [API Utilities](/api/client/api-utilities) - HTTP client utilities
+- [Base Context](/guides/multi-tenant-setup) - React context for base_id management
+- [Multi-Tenant Architecture](/guides/multi-tenant-setup) - Overview of RLS isolation

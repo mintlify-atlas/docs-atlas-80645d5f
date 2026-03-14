@@ -1,0 +1,352 @@
+---
+title: 'scraping_jobs Table'
+description: 'Multi-tenant scraping job management and configuration'
+icon: 'briefcase'
+---
+
+## Overview
+
+The `scraping_jobs` table is the **core table** for multi-tenant job management. Each job represents an influencer's scraping campaign on a specific platform (Instagram, Threads, TikTok, or X).
+
+<Info>
+The `base_id` column in this table serves as the **source of truth** for multi-tenant isolation across all related tables.
+</Info>
+
+## Schema Definition
+
+```sql
+CREATE TABLE scraping_jobs (
+  job_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  influencer_name TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  airtable_base_id TEXT,
+  base_id TEXT NOT NULL,  -- Multi-tenant isolation key
+  num_vas INTEGER,
+  status TEXT DEFAULT 'active',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+## Column Reference
+
+<ResponseField name="job_id" type="UUID" required>
+  Primary key - Auto-generated unique identifier for the job
+  
+  ```typescript
+  job_id: string // UUID format
+  ```
+</ResponseField>
+
+<ResponseField name="influencer_name" type="TEXT" required>
+  Name of the influencer this job belongs to
+  
+  ```typescript
+  influencer_name: string // e.g., "Taylor Swift"
+  ```
+  
+  <Note>Used for display purposes and job identification in the UI</Note>
+</ResponseField>
+
+<ResponseField name="platform" type="TEXT" required>
+  Social media platform for scraping
+  
+  ```typescript
+  type Platform = 'instagram' | 'threads' | 'tiktok' | 'x'
+  platform: Platform
+  ```
+  
+  **Valid values:**
+  - `instagram` - Instagram platform
+  - `threads` - Threads platform
+  - `tiktok` - TikTok platform
+  - `x` - X (formerly Twitter) platform
+</ResponseField>
+
+<ResponseField name="airtable_base_id" type="TEXT">
+  Airtable base ID for VA workspace synchronization
+  
+  ```typescript
+  airtable_base_id: string | null // e.g., "appXYZ123"
+  ```
+  
+  <Info>
+  This ID is extracted from the Airtable base URL provided by the user during job creation.
+  </Info>
+</ResponseField>
+
+<ResponseField name="base_id" type="TEXT" required>
+  **Multi-tenant isolation key** - Ensures data separation between jobs
+  
+  ```typescript
+  base_id: string // Typically same as airtable_base_id
+  ```
+  
+  <Warning>
+  This field is critical for RLS policies. All related tables (global_usernames, daily_assignments, campaigns) must use this base_id for filtering.
+  </Warning>
+</ResponseField>
+
+<ResponseField name="num_vas" type="INTEGER">
+  Number of virtual assistants assigned to this job
+  
+  ```typescript
+  num_vas: number | null // e.g., 80
+  ```
+  
+  <Note>Determines how many VA tables profiles will be distributed across</Note>
+</ResponseField>
+
+<ResponseField name="status" type="TEXT" default="active">
+  Current status of the job
+  
+  ```typescript
+  type JobStatus = 'active' | 'paused' | 'archived'
+  status: JobStatus
+  ```
+  
+  **Status values:**
+  - `active` - Job is currently active and running
+  - `paused` - Job is temporarily paused
+  - `archived` - Job is archived (soft delete)
+</ResponseField>
+
+<ResponseField name="created_at" type="TIMESTAMPTZ" default="NOW()">
+  Timestamp when the job was created
+  
+  ```typescript
+  created_at: string // ISO 8601 format
+  ```
+</ResponseField>
+
+<ResponseField name="updated_at" type="TIMESTAMPTZ" default="NOW()">
+  Timestamp of the last update to the job
+  
+  ```typescript
+  updated_at: string | null // ISO 8601 format
+  ```
+</ResponseField>
+
+## TypeScript Interface
+
+```typescript
+export interface ScrapingJob {
+  job_id: string;
+  influencer_name: string;
+  platform: Platform;
+  airtable_base_id: string;
+  base_id: string; // Multi-tenant isolation key
+  num_vas: number | null;
+  status: JobStatus;
+  created_at: string;
+  updated_at: string | null;
+}
+```
+
+## Indexes and Constraints
+
+```sql
+-- Primary key index
+CREATE INDEX idx_scraping_jobs_pkey ON scraping_jobs(job_id);
+
+-- Platform filtering
+CREATE INDEX idx_scraping_jobs_platform ON scraping_jobs(platform);
+
+-- Status filtering
+CREATE INDEX idx_scraping_jobs_status ON scraping_jobs(status);
+
+-- Multi-tenant isolation
+CREATE INDEX idx_scraping_jobs_base_id ON scraping_jobs(base_id);
+
+-- Status constraint
+ALTER TABLE scraping_jobs
+  ADD CONSTRAINT scraping_jobs_status_check
+  CHECK (status IN ('active', 'paused', 'archived'));
+
+-- Platform constraint
+ALTER TABLE scraping_jobs
+  ADD CONSTRAINT scraping_jobs_platform_check
+  CHECK (platform IN ('instagram', 'threads', 'tiktok', 'x'));
+```
+
+## Relationships
+
+### One-to-Many: Job → Usernames
+
+```typescript
+// One job has many usernames
+const usernames = await supabase
+  .from('global_usernames')
+  .select('*')
+  .eq('job_id', jobId)
+```
+
+### One-to-Many: Job → Assignments
+
+```typescript
+// One job has many assignments
+const assignments = await supabase
+  .from('daily_assignments')
+  .select('*')
+  .eq('job_id', jobId)
+```
+
+### One-to-Many: Job → Campaigns
+
+```typescript
+// One job can have multiple campaigns
+const campaigns = await supabase
+  .from('campaigns')
+  .select('*')
+  .eq('base_id', job.base_id)
+```
+
+## Common Queries
+
+### Get Active Job
+
+```typescript
+import { getActiveJob } from '@/lib/scraping-jobs'
+
+const activeJob = await getActiveJob()
+if (activeJob) {
+  console.log('Active job:', activeJob.influencer_name)
+  console.log('Base ID:', activeJob.base_id)
+}
+```
+
+### Get Jobs by Platform
+
+```typescript
+import { getJobsByPlatform } from '@/lib/scraping-jobs'
+
+const instagramJobs = await getJobsByPlatform('instagram')
+const activeInstagramJobs = await getJobsByPlatform('instagram', true)
+```
+
+### Create New Job
+
+```typescript
+import { createScrapingJob } from '@/lib/scraping-jobs'
+
+const newJob = await createScrapingJob({
+  influencer_name: 'Taylor Swift',
+  platform: 'instagram',
+  airtable_base_id: 'appXYZ123',
+  num_vas: 80,
+  status: 'active'
+})
+```
+
+### Update Job Status
+
+```typescript
+import { updateJobStatus } from '@/lib/scraping-jobs'
+
+// Pause a job
+await updateJobStatus(jobId, 'paused')
+
+// Archive a job
+await updateJobStatus(jobId, 'archived')
+
+// Activate a job
+await updateJobStatus(jobId, 'active')
+```
+
+### Get Job with Statistics
+
+```typescript
+import { getJobWithStats } from '@/lib/scraping-jobs'
+
+const jobWithStats = await getJobWithStats(jobId)
+if (jobWithStats) {
+  console.log('Total usernames:', jobWithStats.stats.totalUsernames)
+  console.log('Available:', jobWithStats.stats.availableUsernames)
+  console.log('Used:', jobWithStats.stats.usedUsernames)
+}
+```
+
+## Multi-Tenant Workflow
+
+### 1. Job Creation
+
+```typescript
+// User creates a new job via the Configure page
+const job = await createScrapingJob({
+  influencer_name: 'Taylor Swift',
+  platform: 'instagram',
+  airtable_base_id: 'appXYZ123',
+  num_vas: 80
+})
+
+// base_id is automatically set to airtable_base_id
+console.log(job.base_id) // "appXYZ123"
+```
+
+### 2. Context Initialization
+
+```typescript
+import { createSupabaseClientWithContext } from '@/lib/supabase'
+
+// Create a context-aware client for this job
+const client = createSupabaseClientWithContext(job.base_id)
+
+// All queries use this client for proper isolation
+const { data } = await client
+  .from('global_usernames')
+  .select('*')
+  // RLS automatically filters by base_id from headers
+```
+
+### 3. Data Isolation
+
+All related operations automatically filter by `base_id`:
+
+```typescript
+// Adding usernames to job
+await addUsernamesToJob(jobId, baseId, usernames)
+
+// Creating assignments
+await createJobAssignments(jobId, campaignId, baseId, assignments)
+
+// Fetching statistics
+await getJobStatisticsByBaseId(baseId)
+```
+
+## Best Practices
+
+<Check>**Always use base_id for multi-tenant operations** - Pass base_id explicitly to all functions that modify data</Check>
+
+<Check>**Fetch active job on app load** - Use `getActiveJob()` to determine which base_id to use</Check>
+
+<Check>**Validate base_id before operations** - Ensure base_id exists before creating assignments or usernames</Check>
+
+<Warning>**Never hardcode base_id values** - Always fetch from the active job or user context</Warning>
+
+## Legacy Placeholder Job
+
+For backward compatibility with data created before multi-tenancy:
+
+```typescript
+export const LEGACY_PLACEHOLDER_JOB_ID = '00000000-0000-0000-0000-000000000001'
+
+export function isLegacyJob(jobId: string | null): boolean {
+  return jobId === LEGACY_PLACEHOLDER_JOB_ID
+}
+```
+
+<Note>
+The legacy placeholder job contains all data created before the multi-tenant migration. New jobs should never use this ID.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Global Usernames" icon="at" href="/database/global-usernames">
+    Learn how usernames are stored and tracked
+  </Card>
+  
+  <Card title="Job Configuration" icon="gear" href="/features/scraping-jobs">
+    Create and manage scraping jobs
+  </Card>
+</CardGroup>

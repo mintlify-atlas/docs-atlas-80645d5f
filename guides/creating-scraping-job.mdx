@@ -1,0 +1,203 @@
+---
+title: Creating a Scraping Job
+description: Step-by-step guide to creating and configuring a new scraping campaign
+---
+
+## Overview
+
+Scraping jobs are the foundation of the Click Creators platform. Each job represents a campaign tied to an influencer, platform (Instagram, TikTok, Threads, or X), and a specific Airtable workspace for your VAs.
+
+<Note>
+Every scraping job gets its own **base_id** for complete data isolation. This ensures profiles, campaigns, and assignments never mix between different influencers.
+</Note>
+
+## Prerequisites
+
+Before creating a scraping job, ensure you have:
+
+- Access to the application dashboard
+- An Airtable account with a prepared base
+- Valid API credentials (configured in environment variables)
+- At least one VA table set up in your Airtable base
+
+## Creating Your First Job
+
+<Steps>
+  <Step title="Navigate to the Configuration Page">
+    Click the **"+ New Campaign"** button in the sidebar, or navigate to `/configure` in your browser.
+
+    The configuration page displays a form with three required fields:
+    - Influencer Name
+    - Platform
+    - Number of VAs
+  </Step>
+
+  <Step title="Fill in Campaign Details">
+    ### Influencer Name
+    Enter the name of the influencer whose followers you want to scrape. This is used for:
+    - Identifying the campaign in your dashboard
+    - Naming the Airtable base
+    - Filtering jobs by platform
+
+    **Example:** `Chris Hemsworth`, `Nike`, `TechInfluencer123`
+
+    ### Select Platform
+    Choose from four supported platforms:
+
+    | Platform | Cost per 1,000 | Use Case |
+    |----------|----------------|----------|
+    | **Instagram** | $1.55 | Fashion, lifestyle influencers |
+    | **TikTok** | $2.00 | Short-form video creators |
+    | **X (Twitter)** | $0.15 | News, tech, thought leaders |
+    | **Threads** | $1.55 | Meta's Twitter alternative |
+
+    ### Number of VAs
+    Specify how many Virtual Assistants (VAs) will work on this campaign.
+
+    **Default:** 80 VAs (for campaigns with 180 profiles per VA = 14,400 total)
+
+    <Tip>
+    Start with a smaller number (5-10 VAs) to test your workflow before scaling up to the full 80 VAs.
+    </Tip>
+  </Step>
+
+  <Step title="Submit the Form">
+    Click **"Create Campaign"** to proceed.
+
+    The form validates:
+    - Influencer name is not empty
+    - Platform is selected
+    - Number of VAs is at least 1
+
+    <Warning>
+    Once you click "Create Campaign," you **cannot skip** the Airtable linking step. This is by design to ensure proper data isolation.
+    </Warning>
+  </Step>
+
+  <Step title="Link Your Airtable Base">
+    After submitting the form, a **non-dismissible dialog** appears requesting your Airtable base URL.
+
+    ### Getting Your Airtable Base URL
+    1. Open your Airtable workspace
+    2. Navigate to the base you want to use
+    3. Copy the URL from your browser (format: `https://airtable.com/appXXXXXXXXXXXXXX`)
+    4. Paste it into the dialog
+
+    **Example URL:**
+    ```
+    https://airtable.com/app123abc456def789
+    ```
+
+    The system extracts the `base_id` (e.g., `app123abc456def789`) from your URL automatically.
+
+    <Note>
+    The base_id becomes the **tenant identifier** for this job. All data (profiles, campaigns, assignments) will be isolated using this base_id.
+    </Note>
+  </Step>
+
+  <Step title="Wait for Setup to Complete">
+    After linking Airtable, a progress dialog shows setup progress:
+
+    - **Creating VA tables** (0-50%)
+    - **Configuring fields** (50-80%)
+    - **Finalizing setup** (80-100%)
+
+    This process takes approximately **3-5 seconds**.
+
+    <Warning>
+    Do not close your browser during setup. The tables are being created in your Airtable base.
+    </Warning>
+  </Step>
+
+  <Step title="Automatic Redirect">
+    Once setup completes, you'll be redirected to:
+
+    - **Dashboard view:** `/callum-dashboard?job={job_id}` (if job_id is available)
+    - **Platform view:** `/{platform}-jobs` (e.g., `/instagram-jobs`)
+
+    Your new job now appears in the sidebar under "Recent" and the appropriate platform section.
+  </Step>
+</Steps>
+
+## Post-Creation Checklist
+
+After creating a job, verify:
+
+- [ ] Job appears in the sidebar navigation
+- [ ] Airtable base shows the correct number of VA tables
+- [ ] Each VA table has the correct fields (ID, Username, Full Name, etc.)
+- [ ] The job's base_id matches your Airtable base ID
+- [ ] You can navigate to the job's dashboard
+
+## Understanding the Job Configuration
+
+From the source code (`app/configure/page.tsx:21-26`), here's what happens when you submit:
+
+```typescript
+const currentJobData = {
+  jobId: '',           // Generated after Airtable link
+  influencer: string,  // Your input
+  platform: Platform,  // Instagram | TikTok | Threads | X
+  numVAs: number,      // Your input
+}
+```
+
+The workflow (`app/configure/page.tsx:76-87`):
+1. Form data stored temporarily (not in database)
+2. Airtable link dialog opens (non-skippable)
+3. Progress dialog shows table creation
+4. Job saved to `scraping_jobs` table with `base_id`
+5. Redirect to dashboard or platform view
+
+## Common Issues
+
+### "Form validation failed"
+
+**Cause:** One or more required fields are empty or invalid.
+
+**Solution:**
+- Ensure influencer name is not empty
+- Select a platform from the dropdown
+- Enter at least 1 for number of VAs
+
+### "No active job" after creation
+
+**Cause:** The job was created but not set as active in the database.
+
+**Solution:**
+1. Navigate to the platform jobs list (e.g., `/instagram-jobs`)
+2. Click on your newly created job
+3. The job will be set as active in the BaseContext
+
+### Airtable base not receiving tables
+
+**Cause:** Invalid Airtable API credentials or rate limiting.
+
+**Solution:**
+1. Verify `AIRTABLE_API_KEY` in your backend `.env`
+2. Check Airtable API rate limits (5 requests/second)
+3. Ensure your Airtable base ID is correct
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Add Source Profiles" icon="user-group" href="/guides/managing-source-profiles">
+    Learn how to add Instagram/TikTok accounts to scrape followers from
+  </Card>
+  <Card title="Run a Campaign" icon="rocket" href="/guides/running-campaigns">
+    Start scraping, distributing, and syncing profiles to your VAs
+  </Card>
+</CardGroup>
+
+## API Reference
+
+For developers integrating with the scraping jobs API:
+
+<CardGroup cols={2}>
+  <Card title="Create Job" icon="code" href="/api/client/scraping-jobs">
+    POST endpoint for creating scraping jobs
+  </Card>
+  <Card title="Job Object" icon="database" href="/database/scraping-jobs">
+    Structure of the ScrapingJob type
+  </Card>
+</CardGroup>

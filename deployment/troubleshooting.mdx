@@ -1,0 +1,790 @@
+---
+title: 'Deployment Troubleshooting'
+description: 'Common deployment issues and solutions for the Instagram Marketing Automation Platform'
+icon: 'wrench'
+---
+
+## Overview
+
+This guide covers common deployment issues, error messages, and solutions to help you quickly resolve problems.
+
+<Info>
+  Most deployment issues are caused by misconfigured environment variables or database connection problems.
+</Info>
+
+## Build and Deployment Errors
+
+### Build Failed: TypeScript Errors
+
+**Error Message:**
+```bash
+Type error: Property 'X' does not exist on type 'Y'
+
+Failed to compile.
+```
+
+**Cause:** TypeScript type errors in your code.
+
+**Solution:**
+
+<Steps>
+  <Step title="Run Type Checking Locally">
+    ```bash
+    npm run type-check
+    ```
+    
+    This will show all TypeScript errors.
+  </Step>
+  
+  <Step title="Fix Type Errors">
+    Common fixes:
+    
+    ```typescript
+    // ❌ Missing type annotation
+    const data = await fetchData();
+    
+    // ✅ Add type annotation
+    const data: ProfileData = await fetchData();
+    
+    // ❌ Incorrect property access
+    const name = user.fullName;
+    
+    // ✅ Use optional chaining
+    const name = user?.fullName ?? 'Unknown';
+    ```
+  </Step>
+  
+  <Step title="Test Build">
+    ```bash
+    npm run build
+    ```
+    
+    Ensure build succeeds before deploying.
+  </Step>
+</Steps>
+
+---
+
+### Build Failed: Linting Errors
+
+**Error Message:**
+```bash
+ESLint: X error(s), Y warning(s)
+
+✖ X problems (X errors, Y warnings)
+
+Error: Command "npm run build" exited with 1
+```
+
+**Cause:** ESLint configuration violations.
+
+**Solution:**
+
+<Steps>
+  <Step title="Run Linting Locally">
+    ```bash
+    npm run lint
+    ```
+  </Step>
+  
+  <Step title="Auto-Fix Issues">
+    ```bash
+    npm run lint:fix
+    ```
+    
+    This automatically fixes most linting issues.
+  </Step>
+  
+  <Step title="Manual Fixes">
+    For issues that can't be auto-fixed:
+    
+    ```typescript
+    // ❌ Unused variable
+    const unusedVar = getData();
+    
+    // ✅ Remove or use the variable
+    const data = getData();
+    console.log(data);
+    
+    // ❌ Missing dependency in useEffect
+    useEffect(() => {
+      fetchData(userId);
+    }, []); // ESLint warning
+    
+    // ✅ Add dependency
+    useEffect(() => {
+      fetchData(userId);
+    }, [userId]);
+    ```
+  </Step>
+</Steps>
+
+---
+
+### Build Timeout
+
+**Error Message:**
+```bash
+Error: Build exceeded maximum duration of 45 minutes
+```
+
+**Cause:** Build process taking too long (usually due to dependencies).
+
+**Solution:**
+
+<AccordionGroup>
+  <Accordion title="Clear Build Cache">
+    In Vercel dashboard:
+    1. Go to project "Settings" → "General"
+    2. Scroll to "Build & Development Settings"
+    3. Click "Clear Build Cache"
+    4. Redeploy
+  </Accordion>
+  
+  <Accordion title="Optimize Dependencies">
+    ```bash
+    # Remove unused dependencies
+    npm prune
+    
+    # Clear npm cache
+    npm cache clean --force
+    
+    # Reinstall dependencies
+    rm -rf node_modules package-lock.json
+    npm install
+    ```
+  </Accordion>
+  
+  <Accordion title="Upgrade Vercel Plan">
+    Free tier has 45-minute build limit. Pro tier allows longer builds.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Environment Variable Issues
+
+### Missing Environment Variables
+
+**Error Message:**
+```bash
+Error: NEXT_PUBLIC_SUPABASE_URL is not defined
+Error: Cannot connect to database
+```
+
+**Cause:** Environment variables not configured in deployment platform.
+
+**Solution:**
+
+<Steps>
+  <Step title="Verify Variables in Vercel">
+    1. Go to project "Settings" → "Environment Variables"
+    2. Check all required variables are present:
+       - `NEXT_PUBLIC_APP_URL`
+       - `NEXT_PUBLIC_API_URL`
+       - `NEXT_PUBLIC_SUPABASE_URL`
+       - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+       - `NEXT_PUBLIC_USERNAME`
+       - `NEXT_PUBLIC_PASSWORD`
+       - `NEXT_PUBLIC_OTP`
+       - `NEXT_PUBLIC_DAILY_SELECTION_TARGET`
+       - `NEXT_PUBLIC_DELETE_PASSWORD`
+  </Step>
+  
+  <Step title="Add Missing Variables">
+    Click "Add Variable" and enter:
+    - **Name**: Variable name (e.g., `NEXT_PUBLIC_SUPABASE_URL`)
+    - **Value**: Variable value
+    - **Environment**: Select Production, Preview, Development
+  </Step>
+  
+  <Step title="Redeploy">
+    After adding variables, trigger a new deployment:
+    ```bash
+    vercel --prod
+    ```
+    
+    Or use "Deployments" → "Redeploy" in Vercel dashboard.
+  </Step>
+</Steps>
+
+<Warning>
+  Environment variables are only applied to new deployments. You must redeploy after changing variables.
+</Warning>
+
+---
+
+### Incorrect Environment Variable Values
+
+**Error Message:**
+```bash
+Error: Invalid Supabase URL
+Failed to fetch from API
+```
+
+**Cause:** Environment variable contains incorrect value.
+
+**Solution:**
+
+<AccordionGroup>
+  <Accordion title="Verify Supabase Credentials">
+    1. Go to [Supabase Dashboard](https://supabase.com/dashboard)
+    2. Select your project
+    3. Go to "Settings" → "API"
+    4. Copy:
+       - **URL**: `NEXT_PUBLIC_SUPABASE_URL`
+       - **anon public**: `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+    
+    <Warning>
+      Use **anon public** key for frontend, **service_role** key only for backend.
+    </Warning>
+  </Accordion>
+  
+  <Accordion title="Verify API URL">
+    Test your backend API is accessible:
+    
+    ```bash
+    curl https://your-backend-api.com/health
+    ```
+    
+    Update `NEXT_PUBLIC_API_URL` with correct URL.
+  </Accordion>
+  
+  <Accordion title="Check for Trailing Slashes">
+    ```bash
+    # ❌ Incorrect (trailing slash)
+    NEXT_PUBLIC_API_URL=https://api.example.com/
+    
+    # ✅ Correct (no trailing slash)
+    NEXT_PUBLIC_API_URL=https://api.example.com
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Database Connection Issues
+
+### Cannot Connect to Supabase
+
+**Error Message:**
+```bash
+Error: Failed to connect to database
+SupabaseClient is not initialized
+```
+
+**Cause:** Incorrect Supabase credentials or network issues.
+
+**Solution:**
+
+<Steps>
+  <Step title="Verify Supabase Project Status">
+    1. Check if Supabase project is active (not paused)
+    2. Go to [Supabase Dashboard](https://supabase.com/dashboard)
+    3. Ensure project shows "Active" status
+    
+    <Info>
+      Free tier projects pause after 1 week of inactivity. Upgrade to Pro to prevent pausing.
+    </Info>
+  </Step>
+  
+  <Step title="Test Connection Locally">
+    ```typescript
+    import { createClient } from '@supabase/supabase-js';
+    
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+    
+    const { data, error } = await supabase
+      .from('source_profiles')
+      .select('count');
+    
+    console.log('Connection test:', { data, error });
+    ```
+  </Step>
+  
+  <Step title="Check Network Policies">
+    In Supabase Dashboard:
+    1. Go to "Settings" → "Database"
+    2. Check "Connection Pooling" settings
+    3. Verify network restrictions allow your deployment platform
+  </Step>
+  
+  <Step title="Verify RLS Policies">
+    ```sql
+    -- Check if RLS is blocking access
+    SELECT tablename, policyname 
+    FROM pg_policies 
+    WHERE schemaname = 'public';
+    ```
+    
+    Ensure anon role has appropriate permissions.
+  </Step>
+</Steps>
+
+---
+
+### Database Tables Not Found
+
+**Error Message:**
+```bash
+Error: relation "source_profiles" does not exist
+PostgreSQL error: table does not exist
+```
+
+**Cause:** Database schema not created.
+
+**Solution:**
+
+<Steps>
+  <Step title="Run Database Migrations">
+    Execute SQL schema in Supabase SQL Editor:
+    
+    ```sql
+    -- Create all required tables
+    CREATE TABLE source_profiles (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      username TEXT NOT NULL UNIQUE,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE raw_scraped_profiles (
+      id TEXT PRIMARY KEY,
+      username TEXT,
+      full_name TEXT,
+      follower_count INTEGER,
+      following_count INTEGER,
+      post_count INTEGER,
+      is_verified BOOLEAN,
+      is_private BOOLEAN,
+      biography TEXT,
+      url TEXT,
+      detected_gender TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE global_usernames (
+      username TEXT PRIMARY KEY,
+      used BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE campaigns (
+      campaign_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      campaign_date DATE NOT NULL,
+      total_assigned INTEGER NOT NULL,
+      status TEXT CHECK (status IN ('pending', 'success', 'failed')),
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE daily_assignments (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      campaign_id UUID REFERENCES campaigns(campaign_id),
+      username TEXT,
+      va_table_number INTEGER,
+      assigned_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    CREATE TABLE scraping_jobs (
+      job_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      influencer_name TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      airtable_base_id TEXT,
+      num_vas INTEGER,
+      status TEXT DEFAULT 'active',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    ```
+  </Step>
+  
+  <Step title="Verify Tables Created">
+    ```sql
+    -- List all tables
+    SELECT table_name 
+    FROM information_schema.tables 
+    WHERE table_schema = 'public';
+    ```
+  </Step>
+  
+  <Step title="Enable RLS">
+    ```sql
+    -- Enable RLS on all tables
+    ALTER TABLE source_profiles ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE raw_scraped_profiles ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE global_usernames ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE daily_assignments ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE scraping_jobs ENABLE ROW LEVEL SECURITY;
+    ```
+  </Step>
+</Steps>
+
+---
+
+## API and Backend Issues
+
+### Backend API Not Responding
+
+**Error Message:**
+```bash
+Error: Failed to fetch
+networkError: Network request failed
+CORS error
+```
+
+**Cause:** Backend API is down or CORS not configured.
+
+**Solution:**
+
+<Steps>
+  <Step title="Verify Backend is Running">
+    Test API health endpoint:
+    
+    ```bash
+    curl https://your-backend-api.com/health
+    ```
+    
+    If no response, backend is not running or not deployed.
+  </Step>
+  
+  <Step title="Check Backend Logs">
+    Review logs in your backend hosting platform (Railway, Render, etc.):
+    - Look for startup errors
+    - Check for crash loops
+    - Verify all dependencies installed
+  </Step>
+  
+  <Step title="Configure CORS">
+    Ensure backend allows requests from frontend:
+    
+    ```python Flask Backend
+    from flask_cors import CORS
+    
+    app = Flask(__name__)
+    CORS(app, origins=[
+        'https://your-frontend.vercel.app',
+        'http://localhost:3000'  # for development
+    ])
+    ```
+  </Step>
+  
+  <Step title="Test API Endpoints">
+    ```bash
+    # Test scraping endpoint
+    curl -X POST https://your-api.com/api/scrape-followers \
+      -H "Content-Type: application/json" \
+      -d '{"accounts": ["test"], "targetGender": "male"}'
+    ```
+  </Step>
+</Steps>
+
+---
+
+### Scraping Workflow Failed
+
+**Error Message:**
+```bash
+Error: Apify actor run failed
+Error: Cannot scrape Instagram followers
+```
+
+**Cause:** Apify API issues or invalid configuration.
+
+**Solution:**
+
+<AccordionGroup>
+  <Accordion title="Verify Apify Credentials">
+    1. Go to [Apify Console](https://console.apify.com)
+    2. Check "Settings" → "Integrations" for API token
+    3. Verify token has not expired
+    4. Update `APIFY_API_KEY` in backend environment variables
+  </Accordion>
+  
+  <Accordion title="Check Apify Actor Status">
+    1. Verify actor ID is correct in `APIFY_ACTOR_ID`
+    2. Check actor is not deprecated
+    3. Review recent runs in Apify Console
+    4. Check run quota/limits not exceeded
+  </Accordion>
+  
+  <Accordion title="Test Manual Run">
+    Test actor directly in Apify Console:
+    1. Go to "Actors" → Your Actor
+    2. Click "Try it"
+    3. Enter test Instagram username
+    4. Run and check results
+  </Accordion>
+  
+  <Accordion title="Check Instagram Accounts">
+    Ensure source accounts are:
+    - ✅ Public (not private)
+    - ✅ Valid usernames
+    - ✅ Not banned/suspended
+    - ✅ Have followers to scrape
+  </Accordion>
+</AccordionGroup>
+
+---
+
+### Airtable Sync Failed
+
+**Error Message:**
+```bash
+Error: Airtable API request failed
+Error: Invalid API key
+```
+
+**Cause:** Airtable API issues or missing tables.
+
+**Solution:**
+
+<Steps>
+  <Step title="Verify Airtable API Key">
+    1. Go to [Airtable Account](https://airtable.com/account)
+    2. Generate new API key if needed
+    3. Update `AIRTABLE_API_KEY` in backend environment
+  </Step>
+  
+  <Step title="Check Base and Tables">
+    1. Verify `AIRTABLE_BASE_ID` is correct
+    2. Ensure all 80 VA tables exist (Table 1 - Table 80)
+    3. Check table permissions allow API writes
+  </Step>
+  
+  <Step title="Test API Connection">
+    ```bash
+    curl https://api.airtable.com/v0/{baseId}/Table%201 \
+      -H "Authorization: Bearer YOUR_API_KEY"
+    ```
+  </Step>
+  
+  <Step title="Check Rate Limits">
+    Airtable has rate limits:
+    - 5 requests per second per base
+    - Backend should implement delays between batch uploads
+  </Step>
+</Steps>
+
+---
+
+## Runtime Errors
+
+### Application Loads Blank Page
+
+**Symptoms:**
+- White screen on production
+- No content rendered
+- Console shows errors
+
+**Solution:**
+
+<Steps>
+  <Step title="Check Browser Console">
+    Open DevTools (F12) and check Console tab for errors:
+    
+    ```
+    Uncaught Error: Cannot read property 'X' of undefined
+    Failed to load resource: 404
+    ```
+  </Step>
+  
+  <Step title="Verify Assets Loading">
+    In Network tab, check:
+    - ✅ JavaScript bundles load (/_next/static/*.js)
+    - ✅ CSS files load (/_next/static/*.css)
+    - ✅ No 404 errors for static assets
+  </Step>
+  
+  <Step title="Check Environment Variables">
+    Missing critical variables can cause initialization failures:
+    
+    ```typescript
+    // This will cause blank page if undefined
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,  // undefined = crash
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+    ```
+  </Step>
+  
+  <Step title="Review Vercel Function Logs">
+    In Vercel Dashboard:
+    1. Go to "Deployments" → Select deployment
+    2. Click "Functions" tab
+    3. Look for runtime errors
+  </Step>
+</Steps>
+
+---
+
+### Authentication Not Working
+
+**Error Message:**
+```bash
+Invalid credentials
+Authentication failed
+```
+
+**Cause:** Incorrect credentials in environment variables.
+
+**Solution:**
+
+<Steps>
+  <Step title="Verify Credentials">
+    Check environment variables match your production credentials:
+    
+    ```bash
+    NEXT_PUBLIC_USERNAME=correct-username
+    NEXT_PUBLIC_PASSWORD=correct-password
+    NEXT_PUBLIC_OTP=correct-otp
+    ```
+  </Step>
+  
+  <Step title="Test Locally">
+    ```bash
+    # Set production environment variables
+    export NEXT_PUBLIC_USERNAME=your-username
+    export NEXT_PUBLIC_PASSWORD=your-password
+    export NEXT_PUBLIC_OTP=your-otp
+    
+    # Run production build
+    npm run build
+    npm run start
+    
+    # Test login at http://localhost:3000/callum
+    ```
+  </Step>
+  
+  <Step title="Clear Browser Cache">
+    Old cached credentials may cause issues:
+    1. Open DevTools (F12)
+    2. Right-click refresh button
+    3. Select "Empty Cache and Hard Reload"
+  </Step>
+</Steps>
+
+---
+
+## Performance Issues
+
+### Slow Page Load Times
+
+**Symptoms:**
+- Pages take >3 seconds to load
+- Vercel Analytics shows poor Core Web Vitals
+
+**Solution:**
+
+<AccordionGroup>
+  <Accordion title="Optimize Database Queries">
+    ```typescript
+    // ❌ Fetching too much data
+    const { data } = await supabase
+      .from('raw_scraped_profiles')
+      .select('*');
+    
+    // ✅ Limit and select only needed columns
+    const { data } = await supabase
+      .from('raw_scraped_profiles')
+      .select('id, username, full_name')
+      .limit(100);
+    ```
+  </Accordion>
+  
+  <Accordion title="Add Loading States">
+    ```typescript
+    import { Skeleton } from '@/components/ui/skeleton';
+    
+    export default function Page() {
+      const [loading, setLoading] = useState(true);
+      
+      if (loading) {
+        return <Skeleton className="h-96 w-full" />;
+      }
+      
+      return <ActualContent />;
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Enable Edge Caching">
+    ```typescript
+    // In API routes or page components
+    export const runtime = 'edge';
+    export const revalidate = 60; // Cache for 60 seconds
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Getting Help
+
+### Debug Checklist
+
+Before requesting support, check:
+
+<Accordion title="Deployment Debug Checklist">
+  - [ ] Build succeeds locally (`npm run build`)
+  - [ ] All environment variables configured
+  - [ ] Supabase project is active and accessible
+  - [ ] Database tables exist and RLS is configured
+  - [ ] Backend API is running and accessible
+  - [ ] CORS configured correctly
+  - [ ] API keys are valid and not expired
+  - [ ] Browser console shows no errors
+  - [ ] Network tab shows no 404/500 errors
+  - [ ] Vercel function logs show no errors
+</Accordion>
+
+### Useful Commands
+
+```bash
+# Test production build locally
+npm run build && npm run start
+
+# Check TypeScript errors
+npm run type-check
+
+# Check linting errors
+npm run lint
+
+# Clear Next.js cache
+rm -rf .next
+
+# Reinstall dependencies
+rm -rf node_modules package-lock.json && npm install
+
+# Test Supabase connection
+curl https://your-project.supabase.co/rest/v1/source_profiles \
+  -H "apikey: your-anon-key"
+
+# Test backend API
+curl https://your-backend-api.com/health
+
+# View Vercel deployment logs
+vercel logs
+```
+
+### Contact Support
+
+If issues persist after trying these solutions:
+
+1. **Vercel Support**: [vercel.com/support](https://vercel.com/support)
+2. **Supabase Support**: [supabase.com/support](https://supabase.com/support)
+3. **Apify Support**: [apify.com/contact](https://apify.com/contact)
+4. **Airtable Support**: [airtable.com/support](https://airtable.com/support)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Deployment Overview" icon="rocket" href="/deployment/overview">
+    Learn about deployment options
+  </Card>
+  <Card title="Production Checklist" icon="list-check" href="/deployment/production-checklist">
+    Pre-deployment checklist
+  </Card>
+</CardGroup>

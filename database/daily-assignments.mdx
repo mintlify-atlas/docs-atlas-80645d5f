@@ -1,0 +1,549 @@
+---
+title: 'daily_assignments Table'
+description: 'Profile-to-VA assignments for campaign distribution'
+icon: 'list-check'
+---
+
+## Overview
+
+The `daily_assignments` table stores the distribution of profiles to **80 Virtual Assistants (VAs)**. Each campaign assigns **14,400 profiles** with **180 profiles per VA**.
+
+<Info>
+This table serves as the bridge between campaigns and Airtable VA tables, tracking which profiles are assigned to which VAs.
+</Info>
+
+## Schema Definition
+
+```sql
+CREATE TABLE daily_assignments (
+  assignment_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  campaign_id UUID REFERENCES campaigns(campaign_id),
+  id TEXT NOT NULL,  -- Instagram profile ID
+  username TEXT NOT NULL,
+  full_name TEXT,
+  va_table_number INTEGER NOT NULL,
+  position INTEGER NOT NULL,
+  status TEXT DEFAULT 'pending',
+  job_id UUID REFERENCES scraping_jobs(job_id),
+  base_id TEXT NOT NULL,  -- Multi-tenant isolation key
+  assigned_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMPTZ
+);
+```
+
+## Column Reference
+
+<ResponseField name="assignment_id" type="UUID" required>
+  Primary key - Auto-generated unique identifier for the assignment
+  
+  ```typescript
+  assignment_id: string // UUID format
+  ```
+</ResponseField>
+
+<ResponseField name="campaign_id" type="UUID" required>
+  Foreign key reference to the parent campaign
+  
+  ```typescript
+  campaign_id: string // UUID referencing campaigns.campaign_id
+  ```
+  
+  <Note>
+  All assignments for a campaign share the same campaign_id for grouping and cleanup.
+  </Note>
+</ResponseField>
+
+<ResponseField name="id" type="TEXT" required>
+  Instagram profile ID from global_usernames table
+  
+  ```typescript
+  id: string // Instagram's internal profile ID
+  ```
+  
+  <Info>
+  This ID links to the global_usernames.id field for profile details.
+  </Info>
+</ResponseField>
+
+<ResponseField name="username" type="TEXT" required>
+  Instagram username for the assigned profile
+  
+  ```typescript
+  username: string // e.g., "john_doe"
+  ```
+  
+  <Note>
+  Denormalized for performance - copied from global_usernames during assignment.
+  </Note>
+</ResponseField>
+
+<ResponseField name="full_name" type="TEXT">
+  Full name of the Instagram user
+  
+  ```typescript
+  full_name: string | null // e.g., "John Doe"
+  ```
+  
+  <Note>
+  Also denormalized for display in Airtable VA tables.
+  </Note>
+</ResponseField>
+
+<ResponseField name="va_table_number" type="INTEGER" required>
+  VA table number (1-80)
+  
+  ```typescript
+  va_table_number: number // Range: 1 to 80
+  ```
+  
+  **Distribution:**
+  - VA 1 gets positions 1-180
+  - VA 2 gets positions 181-360
+  - ...
+  - VA 80 gets positions 14221-14400
+</ResponseField>
+
+<ResponseField name="position" type="INTEGER" required>
+  Position within the VA's assignment list
+  
+  ```typescript
+  position: number // Range: 1 to 180
+  ```
+  
+  <Note>
+  Used for ordering profiles within each VA's table in Airtable.
+  </Note>
+</ResponseField>
+
+<ResponseField name="status" type="TEXT" default="pending">
+  Current status of the assignment
+  
+  ```typescript
+  type AssignmentStatus = 'pending' | 'followed' | 'unfollow' | 'completed'
+  status: AssignmentStatus
+  ```
+  
+  **Status values:**
+  - `pending` - Not yet actioned by VA
+  - `followed` - VA has followed the account
+  - `unfollow` - VA should unfollow
+  - `completed` - Action completed
+</ResponseField>
+
+<ResponseField name="job_id" type="UUID">
+  Foreign key reference to the scraping job
+  
+  ```typescript
+  job_id: string | null // UUID referencing scraping_jobs.job_id
+  ```
+  
+  <Info>
+  Nullable to support legacy assignments. New assignments always include job_id.
+  </Info>
+</ResponseField>
+
+<ResponseField name="base_id" type="TEXT" required>
+  Multi-tenant isolation key - Links to scraping job's base_id
+  
+  ```typescript
+  base_id: string // e.g., "appXYZ123"
+  ```
+  
+  <Warning>
+  Critical for RLS policies and multi-tenant data isolation.
+  </Warning>
+</ResponseField>
+
+<ResponseField name="assigned_at" type="TIMESTAMP" default="NOW()">
+  Timestamp when the assignment was created
+  
+  ```typescript
+  assigned_at: string // ISO 8601 format
+  ```
+</ResponseField>
+
+<ResponseField name="updated_at" type="TIMESTAMPTZ">
+  Timestamp of the last status update
+  
+  ```typescript
+  updated_at: string | null // ISO 8601 format
+  ```
+</ResponseField>
+
+## TypeScript Interface
+
+```typescript
+export interface DailyAssignment {
+  assignment_id: string;
+  campaign_id: string;
+  id: string;
+  username: string;
+  full_name: string | null;
+  va_table_number: number;
+  position: number;
+  status: 'pending' | 'followed' | 'unfollow' | 'completed';
+  job_id: string | null;
+  base_id: string;
+  assigned_at: string;
+  updated_at: string | null;
+}
+```
+
+## Indexes and Constraints
+
+```sql
+-- Primary key index
+CREATE INDEX idx_daily_assignments_pkey ON daily_assignments(assignment_id);
+
+-- Campaign lookup (critical for cleanup)
+CREATE INDEX idx_daily_assignments_campaign ON daily_assignments(campaign_id);
+
+-- VA table filtering
+CREATE INDEX idx_daily_assignments_va_table ON daily_assignments(va_table_number);
+
+-- Multi-tenant isolation
+CREATE INDEX idx_daily_assignments_base_id ON daily_assignments(base_id);
+
+-- Job association
+CREATE INDEX idx_daily_assignments_job_id ON daily_assignments(job_id);
+
+-- Composite index for VA table queries
+CREATE INDEX idx_daily_assignments_base_va ON daily_assignments(base_id, va_table_number);
+
+-- Composite index for campaign queries
+CREATE INDEX idx_daily_assignments_campaign_va ON daily_assignments(campaign_id, va_table_number);
+
+-- Foreign key constraints
+ALTER TABLE daily_assignments
+  ADD CONSTRAINT fk_daily_assignments_campaign
+  FOREIGN KEY (campaign_id)
+  REFERENCES campaigns(campaign_id)
+  ON DELETE CASCADE;
+
+ALTER TABLE daily_assignments
+  ADD CONSTRAINT fk_daily_assignments_job
+  FOREIGN KEY (job_id)
+  REFERENCES scraping_jobs(job_id)
+  ON DELETE SET NULL;
+
+-- VA table number constraint
+ALTER TABLE daily_assignments
+  ADD CONSTRAINT daily_assignments_va_table_check
+  CHECK (va_table_number BETWEEN 1 AND 80);
+
+-- Position constraint
+ALTER TABLE daily_assignments
+  ADD CONSTRAINT daily_assignments_position_check
+  CHECK (position BETWEEN 1 AND 180);
+
+-- Status constraint
+ALTER TABLE daily_assignments
+  ADD CONSTRAINT daily_assignments_status_check
+  CHECK (status IN ('pending', 'followed', 'unfollow', 'completed'));
+```
+
+## Common Queries
+
+### Get Assignments for Campaign
+
+```typescript
+import { supabase } from '@/lib/supabase'
+
+const { data: assignments, error } = await supabase
+  .from('daily_assignments')
+  .select('*')
+  .eq('campaign_id', campaignId)
+  .eq('base_id', baseId)
+  .order('va_table_number', { ascending: true })
+  .order('position', { ascending: true })
+```
+
+### Get Assignments for Specific VA
+
+```typescript
+const vaNumber = 5 // VA Table 5
+
+const { data: vaAssignments } = await supabase
+  .from('daily_assignments')
+  .select('*')
+  .eq('campaign_id', campaignId)
+  .eq('base_id', baseId)
+  .eq('va_table_number', vaNumber)
+  .order('position', { ascending: true })
+
+console.log(`VA ${vaNumber} has ${vaAssignments.length} assignments`)
+```
+
+### Create Assignments
+
+```typescript
+import { createJobAssignments } from '@/lib/scraping-jobs'
+
+const assignments = [
+  {
+    id: '12345',
+    username: 'john_doe',
+    full_name: 'John Doe',
+    va_table_number: 1,
+    position: 1
+  },
+  // ... 14,399 more
+]
+
+await createJobAssignments(jobId, campaignId, baseId, assignments)
+```
+
+### Update Assignment Status
+
+```typescript
+const { error } = await supabase
+  .from('daily_assignments')
+  .update({
+    status: 'followed',
+    updated_at: new Date().toISOString()
+  })
+  .eq('assignment_id', assignmentId)
+  .eq('base_id', baseId)
+```
+
+## Distribution Algorithm
+
+### Equal Distribution (180 per VA)
+
+```typescript
+function distributeProfiles(usernames: GlobalUsername[], numVAs = 80) {
+  const PROFILES_PER_VA = 180
+  const assignments: DailyAssignment[] = []
+  
+  for (let vaNum = 1; vaNum <= numVAs; vaNum++) {
+    const startIdx = (vaNum - 1) * PROFILES_PER_VA
+    const vaProfiles = usernames.slice(startIdx, startIdx + PROFILES_PER_VA)
+    
+    for (let i = 0; i < vaProfiles.length; i++) {
+      assignments.push({
+        campaign_id: campaignId,
+        id: vaProfiles[i].id,
+        username: vaProfiles[i].username,
+        full_name: vaProfiles[i].full_name,
+        va_table_number: vaNum,
+        position: i + 1,
+        status: 'pending',
+        job_id: jobId,
+        base_id: baseId,
+        assigned_at: new Date().toISOString()
+      })
+    }
+  }
+  
+  return assignments
+}
+```
+
+### Example Distribution
+
+```typescript
+// Campaign with 14,400 profiles
+const distribution = {
+  'VA 1': profiles[0:180],     // Positions 1-180
+  'VA 2': profiles[180:360],   // Positions 1-180
+  'VA 3': profiles[360:540],   // Positions 1-180
+  // ...
+  'VA 80': profiles[14220:14400] // Positions 1-180
+}
+```
+
+## Airtable Sync
+
+### Sync VA Table to Airtable
+
+```typescript
+async function syncVATableToAirtable(
+  vaNumber: number,
+  assignments: DailyAssignment[],
+  airtableBaseId: string
+) {
+  const airtable = new Airtable({ apiKey: process.env.AIRTABLE_API_KEY })
+  const base = airtable.base(airtableBaseId)
+  const tableName = `Table ${vaNumber}`
+  
+  // Prepare records for Airtable
+  const records = assignments.map(a => ({
+    fields: {
+      'Username': a.username,
+      'Full Name': a.full_name || '',
+      'Position': a.position,
+      'Status': a.status,
+      'Profile ID': a.id
+    }
+  }))
+  
+  // Batch create (Airtable limit: 10 records per request)
+  const BATCH_SIZE = 10
+  for (let i = 0; i < records.length; i += BATCH_SIZE) {
+    const batch = records.slice(i, i + BATCH_SIZE)
+    await base(tableName).create(batch)
+    
+    // Rate limiting
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+}
+```
+
+### Sync All VA Tables
+
+```typescript
+async function syncCampaignToAirtable(campaignId: string, baseId: string) {
+  const { data: assignments } = await supabase
+    .from('daily_assignments')
+    .select('*')
+    .eq('campaign_id', campaignId)
+    .eq('base_id', baseId)
+    .order('va_table_number')
+  
+  // Group by VA table
+  const grouped = assignments.reduce((acc, a) => {
+    if (!acc[a.va_table_number]) acc[a.va_table_number] = []
+    acc[a.va_table_number].push(a)
+    return acc
+  }, {})
+  
+  // Sync each VA table
+  for (const [vaNum, vaAssignments] of Object.entries(grouped)) {
+    console.log(`Syncing VA ${vaNum}...`)
+    await syncVATableToAirtable(Number(vaNum), vaAssignments, baseId)
+  }
+}
+```
+
+## Lifecycle Management
+
+### Campaign Cleanup (7 Days)
+
+```typescript
+async function cleanupCampaignAssignments(
+  campaignId: string,
+  baseId: string
+) {
+  // Get all assignments for campaign
+  const { data: assignments } = await supabase
+    .from('daily_assignments')
+    .select('id')
+    .eq('campaign_id', campaignId)
+    .eq('base_id', baseId)
+  
+  const profileIds = assignments.map(a => a.id)
+  
+  // Reset 'used' flag in global_usernames
+  await supabase
+    .from('global_usernames')
+    .update({ used: false, used_at: null })
+    .in('id', profileIds)
+    .eq('base_id', baseId)
+  
+  // Delete assignments (cascade from campaign delete)
+  await supabase
+    .from('daily_assignments')
+    .delete()
+    .eq('campaign_id', campaignId)
+    .eq('base_id', baseId)
+  
+  console.log(`Freed ${profileIds.length} profiles for reuse`)
+}
+```
+
+## Statistics and Monitoring
+
+### Get Assignment Counts by VA
+
+```typescript
+const { data: counts } = await supabase
+  .from('daily_assignments')
+  .select('va_table_number')
+  .eq('campaign_id', campaignId)
+  .eq('base_id', baseId)
+
+const groupedCounts = counts.reduce((acc, row) => {
+  acc[row.va_table_number] = (acc[row.va_table_number] || 0) + 1
+  return acc
+}, {})
+
+console.log('Distribution:', groupedCounts)
+// { 1: 180, 2: 180, ..., 80: 180 }
+```
+
+### Get Status Distribution
+
+```typescript
+const { data: assignments } = await supabase
+  .from('daily_assignments')
+  .select('status')
+  .eq('campaign_id', campaignId)
+  .eq('base_id', baseId)
+
+const statusCounts = assignments.reduce((acc, a) => {
+  acc[a.status] = (acc[a.status] || 0) + 1
+  return acc
+}, {})
+
+console.log('Status:', statusCounts)
+// { pending: 12000, followed: 2400 }
+```
+
+## Best Practices
+
+<Check>**Batch insert assignments** - Insert 1000 records at a time for better performance</Check>
+
+<Check>**Validate VA distribution** - Ensure each VA gets exactly 180 profiles</Check>
+
+<Check>**Use CASCADE delete** - Let foreign key cascade handle cleanup when campaigns are deleted</Check>
+
+<Warning>**Always include base_id** - Critical for multi-tenant isolation in all queries</Warning>
+
+<Warning>**Handle Airtable rate limits** - Add delays between batch uploads (200ms recommended)</Warning>
+
+## Performance Optimization
+
+### Batch Inserts
+
+```typescript
+const BATCH_SIZE = 1000
+
+for (let i = 0; i < assignments.length; i += BATCH_SIZE) {
+  const batch = assignments.slice(i, i + BATCH_SIZE)
+  await supabase.from('daily_assignments').insert(batch)
+}
+```
+
+### Efficient VA Queries
+
+```sql
+-- Uses composite index idx_daily_assignments_campaign_va
+SELECT *
+FROM daily_assignments
+WHERE campaign_id = 'campaign-uuid'
+  AND va_table_number = 5
+ORDER BY position;
+```
+
+## Sample Data
+
+```sql
+INSERT INTO daily_assignments (
+  campaign_id, id, username, full_name, va_table_number, position, job_id, base_id
+) VALUES
+  ('campaign-uuid-1', '12345', 'john_doe', 'John Doe', 1, 1, 'job-uuid-1', 'appXYZ123'),
+  ('campaign-uuid-1', '12346', 'jane_smith', 'Jane Smith', 1, 2, 'job-uuid-1', 'appXYZ123'),
+  ('campaign-uuid-1', '12347', 'bob_wilson', 'Bob Wilson', 2, 1, 'job-uuid-1', 'appXYZ123');
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Campaigns" icon="calendar" href="/database/campaigns">
+    Learn about campaign creation and tracking
+  </Card>
+  
+  <Card title="Airtable Sync" icon="cloud-arrow-up" href="/features/airtable-sync">
+    Understand Airtable synchronization
+  </Card>
+</CardGroup>

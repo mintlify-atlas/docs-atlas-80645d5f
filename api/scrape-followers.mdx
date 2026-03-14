@@ -1,0 +1,333 @@
+---
+title: 'POST /api/scrape-followers'
+description: 'Scrape Instagram followers from source accounts with gender filtering'
+icon: 'instagram'
+---
+
+## Endpoint
+
+<CodeGroup>
+```bash cURL
+curl -X POST http://localhost:5001/api/scrape-followers \
+  -H "X-Base-Id: your-base-id" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "accounts": ["username1", "username2"],
+    "targetGender": "male"
+  }'
+```
+
+```typescript TypeScript
+import { apiPost } from '@/lib/api'
+import { useBase } from '@/contexts/base-context'
+
+const { baseId } = useBase()
+
+const response = await apiPost('/api/scrape-followers', baseId, {
+  accounts: ['username1', 'username2'],
+  targetGender: 'male'
+})
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:5001/api/scrape-followers', {
+  method: 'POST',
+  headers: {
+    'X-Base-Id': 'your-base-id',
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    accounts: ['username1', 'username2'],
+    targetGender: 'male'
+  })
+})
+
+const data = await response.json()
+```
+</CodeGroup>
+
+## Description
+
+Scrapes Instagram followers from specified source accounts using the Apify Instagram scraper. Applies gender-based filtering using name detection to identify male profiles.
+
+This endpoint:
+1. Validates source account usernames
+2. Initiates Apify actor runs for each account
+3. Extracts follower profile data
+4. Applies gender detection (male/female/unknown)
+5. Filters results based on target gender
+6. Returns filtered profile list
+
+<Info>
+  This endpoint does **not** save profiles to the database. Use `/api/ingest` to save the returned profiles.
+</Info>
+
+## Request Headers
+
+<ParamField header="X-Base-Id" type="string" required>
+  Airtable base identifier for multi-tenant isolation
+</ParamField>
+
+<ParamField header="Content-Type" type="string" default="application/json">
+  Must be `application/json`
+</ParamField>
+
+## Request Body
+
+<ParamField body="accounts" type="string[]" required>
+  Array of Instagram usernames or profile URLs to scrape followers from.
+  
+  Examples:
+  - `["username1", "username2"]`
+  - `["https://instagram.com/username1"]`
+  
+  **Validation:**
+  - Must be a non-empty array
+  - Each account must be a valid Instagram username or URL
+  - Public accounts only (private accounts will return no followers)
+</ParamField>
+
+<ParamField body="targetGender" type="string" default="male">
+  Gender filter to apply during scraping.
+  
+  **Options:**
+  - `"male"` - Return only male profiles
+  - `"female"` - Return only female profiles
+  - `"all"` - Return all profiles (no filtering)
+  
+  **Default:** `"male"`
+</ParamField>
+
+## Response Fields
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if the scraping operation completed successfully
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  Scraping results and statistics
+</ResponseField>
+
+<ResponseField name="data.accounts" type="array" required>
+  Array of scraped Instagram profile objects
+</ResponseField>
+
+<ResponseField name="data.accounts[].id" type="string">
+  Instagram user ID
+</ResponseField>
+
+<ResponseField name="data.accounts[].username" type="string">
+  Instagram username
+</ResponseField>
+
+<ResponseField name="data.accounts[].full_name" type="string">
+  User's full name (used for gender detection)
+</ResponseField>
+
+<ResponseField name="data.accounts[].follower_count" type="number">
+  Number of followers
+</ResponseField>
+
+<ResponseField name="data.accounts[].following_count" type="number">
+  Number of accounts following
+</ResponseField>
+
+<ResponseField name="data.accounts[].post_count" type="number">
+  Number of posts
+</ResponseField>
+
+<ResponseField name="data.accounts[].is_verified" type="boolean">
+  Instagram verification status
+</ResponseField>
+
+<ResponseField name="data.accounts[].is_private" type="boolean">
+  Account privacy status
+</ResponseField>
+
+<ResponseField name="data.accounts[].biography" type="string">
+  Profile bio text
+</ResponseField>
+
+<ResponseField name="data.accounts[].url" type="string">
+  Instagram profile URL
+</ResponseField>
+
+<ResponseField name="data.accounts[].detected_gender" type="string">
+  Detected gender: `"male"`, `"female"`, or `"unknown"`
+</ResponseField>
+
+<ResponseField name="data.totalScraped" type="number" required>
+  Total number of profiles scraped (before filtering)
+</ResponseField>
+
+<ResponseField name="data.totalFiltered" type="number" required>
+  Number of profiles after gender filtering
+</ResponseField>
+
+<ResponseField name="data.genderDistribution" type="object" required>
+  Breakdown of gender detection results
+</ResponseField>
+
+<ResponseField name="data.genderDistribution.male" type="number">
+  Count of male profiles
+</ResponseField>
+
+<ResponseField name="data.genderDistribution.female" type="number">
+  Count of female profiles
+</ResponseField>
+
+<ResponseField name="data.genderDistribution.unknown" type="number">
+  Count of profiles with unknown gender
+</ResponseField>
+
+## Response Example
+
+### Success Response (200 OK)
+
+```json
+{
+  "success": true,
+  "data": {
+    "accounts": [
+      {
+        "id": "123456789",
+        "username": "john_doe",
+        "full_name": "John Doe",
+        "follower_count": 1543,
+        "following_count": 892,
+        "post_count": 234,
+        "is_verified": false,
+        "is_private": false,
+        "biography": "Fitness enthusiast | NYC",
+        "url": "https://instagram.com/john_doe",
+        "detected_gender": "male"
+      },
+      {
+        "id": "987654321",
+        "username": "mike_smith",
+        "full_name": "Michael Smith",
+        "follower_count": 2341,
+        "following_count": 1234,
+        "post_count": 456,
+        "is_verified": false,
+        "is_private": false,
+        "biography": "Travel | Photography",
+        "url": "https://instagram.com/mike_smith",
+        "detected_gender": "male"
+      }
+    ],
+    "totalScraped": 1000,
+    "totalFiltered": 450,
+    "genderDistribution": {
+      "male": 450,
+      "female": 400,
+      "unknown": 150
+    }
+  }
+}
+```
+
+### Error Response (400 Bad Request)
+
+```json
+{
+  "success": false,
+  "error": "Invalid request parameters",
+  "details": {
+    "accounts": "Must be a non-empty array"
+  }
+}
+```
+
+### Error Response (401 Unauthorized)
+
+```json
+{
+  "success": false,
+  "error": "X-Base-Id header is required"
+}
+```
+
+### Error Response (500 Internal Server Error)
+
+```json
+{
+  "success": false,
+  "error": "Apify scraping failed",
+  "details": {
+    "message": "Actor run timeout after 300 seconds",
+    "actorId": "apify/instagram-scraper"
+  }
+}
+```
+
+## Workflow Integration
+
+This endpoint is typically used in conjunction with `/api/ingest`:
+
+```typescript
+// Step 1: Scrape followers
+const scrapeResponse = await apiPost('/api/scrape-followers', baseId, {
+  accounts: sourceAccounts,
+  targetGender: 'male'
+})
+
+if (scrapeResponse.success) {
+  // Step 2: Ingest profiles to database
+  const ingestResponse = await apiPost('/api/ingest', baseId, {
+    profiles: scrapeResponse.data.accounts
+  })
+}
+```
+
+## Performance Considerations
+
+<Warning>
+  Scraping time varies based on:
+  - Number of source accounts
+  - Follower counts per account
+  - Apify actor performance
+  - Network conditions
+  
+  Expect 30-120 seconds for typical workloads.
+</Warning>
+
+**Optimization Tips:**
+- Batch source accounts (2-5 accounts per request)
+- Monitor Apify run quotas
+- Use public accounts only (private accounts return no data)
+- Consider running during off-peak hours
+
+## Error Handling
+
+Common error scenarios:
+
+### Invalid Instagram Accounts
+
+**Cause:** Account doesn't exist or is private
+
+**Solution:** Verify accounts are public and exist on Instagram
+
+### Apify Quota Exceeded
+
+**Cause:** Monthly Apify run limit reached
+
+**Solution:** Upgrade Apify plan or wait for quota reset
+
+### Timeout
+
+**Cause:** Scraping took longer than 5 minutes
+
+**Solution:** Reduce number of source accounts or retry
+
+## Related Endpoints
+
+<CardGroup cols={2}>
+  <Card title="Ingest Profiles" icon="database" href="/api/ingest">
+    Save scraped profiles to database
+  </Card>
+  
+  <Card title="API Overview" icon="book" href="/api/overview">
+    View complete API documentation
+  </Card>
+</CardGroup>

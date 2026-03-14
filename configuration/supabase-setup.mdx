@@ -1,0 +1,442 @@
+---
+title: Supabase Setup
+description: Configure Supabase database, Row Level Security, and client initialization
+---
+
+## Overview
+
+The Click Creators Scraper Client uses Supabase as its PostgreSQL database for storing scraped profiles, campaigns, scraping jobs, and assignments. This guide covers database setup, Row Level Security (RLS), and client configuration.
+
+## Prerequisites
+
+- A Supabase account ([sign up here](https://supabase.com))
+- A Supabase project created
+- Basic SQL knowledge (optional, for custom modifications)
+
+## Step 1: Create a Supabase Project
+
+1. Go to [Supabase Dashboard](https://app.supabase.com)
+2. Click **"New Project"**
+3. Fill in project details:
+   - **Name:** Click Creators Scraper (or your preferred name)
+   - **Database Password:** Generate a strong password (save this!)
+   - **Region:** Choose closest to your users
+   - **Pricing Plan:** Free tier works for development
+4. Click **"Create new project"**
+5. Wait 2-3 minutes for provisioning
+
+## Step 2: Get API Credentials
+
+Once your project is ready:
+
+1. Navigate to **Settings → API**
+2. Copy the following values:
+
+<CodeGroup>
+```bash Frontend .env.local
+# Project URL
+NEXT_PUBLIC_SUPABASE_URL=https://xxxxxxxxxxxxx.supabase.co
+
+# anon/public key (safe for frontend)
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGci...
+```
+
+```bash Backend .env
+# Project URL (same as frontend)
+SUPABASE_URL=https://xxxxxxxxxxxxx.supabase.co
+
+# service_role key (server-side only, bypasses RLS)
+SUPABASE_KEY=eyJhbGci...
+```
+</CodeGroup>
+
+<Warning>
+  The `service_role` key bypasses all Row Level Security policies. Never expose it in the frontend or commit it to version control.
+</Warning>
+
+## Step 3: Create Database Tables
+
+Run the following SQL in the Supabase SQL Editor (**Database → SQL Editor → New Query**):
+
+<CodeGroup>
+```sql Database Schema
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- 1. Source Profiles Table
+-- Stores Instagram accounts to scrape followers from
+CREATE TABLE source_profiles (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  username TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. Raw Scraped Profiles Table
+-- Stores all scraped Instagram profile data
+CREATE TABLE raw_scraped_profiles (
+  id TEXT PRIMARY KEY,
+  username TEXT,
+  full_name TEXT,
+  follower_count INTEGER,
+  following_count INTEGER,
+  post_count INTEGER,
+  is_verified BOOLEAN,
+  is_private BOOLEAN,
+  biography TEXT,
+  url TEXT,
+  detected_gender TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 3. Global Usernames Table (Multi-Tenant)
+-- Deduplicated username pool with job isolation
+CREATE TABLE global_usernames (
+  id TEXT PRIMARY KEY,
+  username TEXT NOT NULL,
+  full_name TEXT,
+  used BOOLEAN DEFAULT FALSE,
+  used_at TIMESTAMPTZ,
+  job_id UUID,
+  base_id TEXT NOT NULL, -- Multi-tenant isolation key
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(username, base_id)
+);
+
+-- 4. Scraping Jobs Table
+-- Multi-tenant job configuration
+CREATE TABLE scraping_jobs (
+  job_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  influencer_name TEXT NOT NULL,
+  platform TEXT NOT NULL CHECK (platform IN ('instagram', 'threads', 'tiktok', 'x')),
+  airtable_base_id TEXT,
+  base_id TEXT NOT NULL, -- Source of truth for multi-tenant isolation
+  num_vas INTEGER,
+  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'paused', 'archived')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 5. Campaigns Table
+-- Campaign tracking for daily assignments
+CREATE TABLE campaigns (
+  campaign_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  campaign_date DATE NOT NULL,
+  total_assigned INTEGER NOT NULL,
+  status TEXT CHECK (status IN ('pending', 'success', 'failed')),
+  job_id UUID REFERENCES scraping_jobs(job_id),
+  base_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. Daily Assignments Table (Multi-Tenant)
+-- Profile assignments to VA tables
+CREATE TABLE daily_assignments (
+  assignment_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  campaign_id UUID REFERENCES campaigns(campaign_id),
+  id TEXT NOT NULL,
+  username TEXT NOT NULL,
+  full_name TEXT,
+  va_table_number INTEGER NOT NULL,
+  position INTEGER NOT NULL,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'followed', 'unfollow', 'completed')),
+  job_id UUID,
+  base_id TEXT NOT NULL,
+  assigned_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ
+);
+
+-- 7. Scrape Results Table
+-- Results from async scraping operations
+CREATE TABLE scrape_results (
+  id SERIAL PRIMARY KEY,
+  job_id TEXT NOT NULL, -- References async scrape job
+  scraping_job_id UUID REFERENCES scraping_jobs(job_id),
+  profile_id TEXT NOT NULL,
+  username TEXT NOT NULL,
+  full_name TEXT,
+  source_account TEXT,
+  base_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Create indexes for performance
+CREATE INDEX idx_global_usernames_base_id ON global_usernames(base_id);
+CREATE INDEX idx_global_usernames_used ON global_usernames(used);
+CREATE INDEX idx_global_usernames_job_id ON global_usernames(job_id);
+CREATE INDEX idx_daily_assignments_base_id ON daily_assignments(base_id);
+CREATE INDEX idx_daily_assignments_campaign_id ON daily_assignments(campaign_id);
+CREATE INDEX idx_campaigns_base_id ON campaigns(base_id);
+CREATE INDEX idx_scrape_results_base_id ON scrape_results(base_id);
+CREATE INDEX idx_scraping_jobs_base_id ON scraping_jobs(base_id);
+CREATE INDEX idx_scraping_jobs_status ON scraping_jobs(status);
+```
+</CodeGroup>
+
+<Info>
+  The `base_id` column enables multi-tenant data isolation. Each scraping job has its own `base_id`, ensuring data doesn't mix between different influencer campaigns.
+</Info>
+
+## Step 4: Configure Row Level Security (RLS)
+
+Row Level Security ensures data isolation and security. Enable RLS on all tables:
+
+<CodeGroup>
+```sql Enable RLS
+-- Enable RLS on all tables
+ALTER TABLE source_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE raw_scraped_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE global_usernames ENABLE ROW LEVEL SECURITY;
+ALTER TABLE scraping_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE daily_assignments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE scrape_results ENABLE ROW LEVEL SECURITY;
+```
+</CodeGroup>
+
+### RLS Policies for Multi-Tenant Isolation
+
+Create policies that filter data by `base_id` from request headers:
+
+<CodeGroup>
+```sql RLS Policies
+-- Helper function to get base_id from request headers
+CREATE OR REPLACE FUNCTION get_base_id_from_header()
+RETURNS TEXT AS $$
+  SELECT current_setting('request.headers', true)::json->>'x-base-id';
+$$ LANGUAGE SQL STABLE;
+
+-- Global Usernames Policies
+CREATE POLICY "Users can view global_usernames for their base"
+  ON global_usernames FOR SELECT
+  USING (base_id = get_base_id_from_header());
+
+CREATE POLICY "Users can insert global_usernames for their base"
+  ON global_usernames FOR INSERT
+  WITH CHECK (base_id = get_base_id_from_header());
+
+CREATE POLICY "Users can update global_usernames for their base"
+  ON global_usernames FOR UPDATE
+  USING (base_id = get_base_id_from_header());
+
+-- Daily Assignments Policies
+CREATE POLICY "Users can view daily_assignments for their base"
+  ON daily_assignments FOR SELECT
+  USING (base_id = get_base_id_from_header());
+
+CREATE POLICY "Users can insert daily_assignments for their base"
+  ON daily_assignments FOR INSERT
+  WITH CHECK (base_id = get_base_id_from_header());
+
+-- Campaigns Policies
+CREATE POLICY "Users can view campaigns for their base"
+  ON campaigns FOR SELECT
+  USING (base_id = get_base_id_from_header());
+
+CREATE POLICY "Users can insert campaigns for their base"
+  ON campaigns FOR INSERT
+  WITH CHECK (base_id = get_base_id_from_header());
+
+-- Scraping Jobs Policies
+CREATE POLICY "Users can view scraping_jobs for their base"
+  ON scraping_jobs FOR SELECT
+  USING (base_id = get_base_id_from_header());
+
+CREATE POLICY "Users can insert scraping_jobs for their base"
+  ON scraping_jobs FOR INSERT
+  WITH CHECK (base_id = get_base_id_from_header());
+
+CREATE POLICY "Users can update scraping_jobs for their base"
+  ON scraping_jobs FOR UPDATE
+  USING (base_id = get_base_id_from_header());
+
+-- Scrape Results Policies
+CREATE POLICY "Users can view scrape_results for their base"
+  ON scrape_results FOR SELECT
+  USING (base_id = get_base_id_from_header());
+
+CREATE POLICY "Users can insert scrape_results for their base"
+  ON scrape_results FOR INSERT
+  WITH CHECK (base_id = get_base_id_from_header());
+
+-- Source Profiles (shared across all bases)
+CREATE POLICY "Anyone can view source_profiles"
+  ON source_profiles FOR SELECT
+  USING (true);
+
+CREATE POLICY "Anyone can insert source_profiles"
+  ON source_profiles FOR INSERT
+  WITH CHECK (true);
+
+CREATE POLICY "Anyone can delete source_profiles"
+  ON source_profiles FOR DELETE
+  USING (true);
+
+-- Raw Scraped Profiles (shared across all bases)
+CREATE POLICY "Anyone can view raw_scraped_profiles"
+  ON raw_scraped_profiles FOR SELECT
+  USING (true);
+
+CREATE POLICY "Anyone can insert raw_scraped_profiles"
+  ON raw_scraped_profiles FOR INSERT
+  WITH CHECK (true);
+```
+</CodeGroup>
+
+<Info>
+  RLS policies use the `x-base-id` header to filter data. The Supabase client automatically includes this header when using `createSupabaseClientWithContext(baseId)`.
+</Info>
+
+## Step 5: Client Initialization
+
+The application uses two Supabase client patterns:
+
+### Default Client (lib/supabase.ts)
+
+<CodeGroup>
+```typescript Default Client
+import { createClient } from '@supabase/supabase-js'
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+
+export const supabase = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-key'
+)
+```
+</CodeGroup>
+
+### Multi-Tenant Client with Context
+
+<CodeGroup>
+```typescript Multi-Tenant Client
+export function createSupabaseClientWithContext(baseId: string) {
+  if (!baseId) {
+    console.warn('[createSupabaseClientWithContext] No baseId provided!')
+  }
+  
+  return createClient(
+    supabaseUrl || 'https://placeholder.supabase.co',
+    supabaseAnonKey || 'placeholder-key',
+    {
+      global: {
+        headers: {
+          'x-base-id': baseId  // RLS policies use this header
+        }
+      },
+      db: {
+        schema: 'public'
+      }
+    }
+  )
+}
+```
+</CodeGroup>
+
+**Usage Example:**
+
+```typescript
+import { createSupabaseClientWithContext } from '@/lib/supabase'
+
+const baseId = 'app1234567890' // From active scraping job
+const client = createSupabaseClientWithContext(baseId)
+
+// This query automatically filters by base_id via RLS
+const { data } = await client
+  .from('global_usernames')
+  .select('*')
+  .eq('used', false)
+```
+
+## Verification
+
+### Check Table Creation
+
+1. Go to **Table Editor** in Supabase Dashboard
+2. You should see 7 tables:
+   - `source_profiles`
+   - `raw_scraped_profiles`
+   - `global_usernames`
+   - `scraping_jobs`
+   - `campaigns`
+   - `daily_assignments`
+   - `scrape_results`
+
+### Test RLS Policies
+
+<CodeGroup>
+```sql Test Query
+-- This should return 0 rows (no data yet)
+SELECT * FROM global_usernames WHERE used = false;
+
+-- Check RLS is enabled
+SELECT tablename, rowsecurity 
+FROM pg_tables 
+WHERE schemaname = 'public';
+```
+</CodeGroup>
+
+### Test Client Connection
+
+In your Next.js app:
+
+```typescript
+import { supabase } from '@/lib/supabase'
+
+// Test connection
+const { data, error } = await supabase.from('source_profiles').select('*')
+
+if (error) {
+  console.error('Supabase connection failed:', error)
+} else {
+  console.log('Supabase connected successfully!', data)
+}
+```
+
+## Troubleshooting
+
+### "relation does not exist" Error
+
+- Run the database schema SQL again
+- Verify you're in the correct Supabase project
+- Check the **Table Editor** to confirm tables exist
+
+### "JWT expired" or Authentication Errors
+
+- Verify `NEXT_PUBLIC_SUPABASE_ANON_KEY` is correct
+- Check that the key matches your project (keys change between projects)
+- Ensure you're using the `anon` key for frontend, not `service_role`
+
+### RLS Blocking All Queries
+
+- Check that `x-base-id` header is being sent
+- Verify RLS policies are created correctly
+- Use `service_role` key in backend to bypass RLS for testing
+
+### Multi-Tenant Data Mixing
+
+- Ensure all queries use `createSupabaseClientWithContext(baseId)`
+- Verify `base_id` column exists on all tenant tables
+- Check indexes are created for performance
+
+## Best Practices
+
+<Check>
+  - Always use `createSupabaseClientWithContext(baseId)` for tenant-specific queries
+  - Never use `service_role` key in the frontend
+  - Create database backups before schema changes
+  - Monitor RLS policy performance with indexes
+  - Use Supabase real-time subscriptions for live updates
+</Check>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Airtable Integration" icon="table" href="/configuration/airtable-integration">
+    Set up Airtable for VA profile distribution
+  </Card>
+  
+  <Card title="Apify Setup" icon="screwdriver-wrench" href="/configuration/apify-setup">
+    Configure Apify actors for Instagram scraping
+  </Card>
+</CardGroup>

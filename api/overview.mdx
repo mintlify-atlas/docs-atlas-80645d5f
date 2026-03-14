@@ -1,0 +1,232 @@
+---
+title: 'API Overview'
+description: 'Backend API reference for the Instagram Marketing Automation Platform'
+icon: 'code'
+---
+
+## Introduction
+
+The Click Creators Scraper Client backend API provides REST endpoints for managing Instagram follower scraping, profile ingestion, campaign creation, VA distribution, and Airtable synchronization.
+
+This Flask-based API integrates with:
+- **Apify** - Instagram scraping service
+- **Supabase** - PostgreSQL database
+- **Airtable** - VA workspace management
+- **Gender API** - Name-based gender detection
+
+## Base URL
+
+The API base URL is configurable via environment variables:
+
+<CodeGroup>
+```bash Development
+http://localhost:5001
+```
+
+```bash Production
+https://api.yourplatform.com
+```
+</CodeGroup>
+
+Set the base URL in your frontend environment:
+
+```bash .env.local
+NEXT_PUBLIC_API_URL=http://localhost:5001
+```
+
+## Authentication
+
+### Multi-Tenant Base ID
+
+All API requests require a base identifier in the request headers:
+
+```bash
+X-Base-Id: your-airtable-base-id
+```
+
+This header enables multi-tenant support, isolating data between different Airtable workspaces.
+
+### Using the API Client
+
+The frontend provides helper functions in `lib/api.ts`:
+
+```typescript
+import { apiPost, apiGet } from '@/lib/api'
+import { useBase } from '@/contexts/base-context'
+
+const { baseId } = useBase()
+
+// POST request with auto base_id injection
+const response = await apiPost('/api/scrape-followers', baseId, {
+  accounts: ['username1', 'username2'],
+  targetGender: 'male'
+})
+
+// GET request
+const data = await apiGet('/api/status', baseId)
+```
+
+## Request Format
+
+All POST requests should include:
+
+<ParamField header="X-Base-Id" type="string" required>
+  Airtable base identifier for multi-tenant isolation
+</ParamField>
+
+<ParamField header="Content-Type" type="string" default="application/json">
+  Request content type
+</ParamField>
+
+## Response Format
+
+All API responses follow a consistent structure:
+
+### Success Response
+
+```json
+{
+  "success": true,
+  "data": {
+    // Endpoint-specific data
+  }
+}
+```
+
+### Error Response
+
+```json
+{
+  "success": false,
+  "error": "Error message",
+  "details": {
+    // Additional error context
+  }
+}
+```
+
+## Status Codes
+
+<ResponseField name="200" type="OK">
+  Request successful
+</ResponseField>
+
+<ResponseField name="400" type="Bad Request">
+  Invalid request parameters
+</ResponseField>
+
+<ResponseField name="401" type="Unauthorized">
+  Missing or invalid authentication
+</ResponseField>
+
+<ResponseField name="404" type="Not Found">
+  Resource not found
+</ResponseField>
+
+<ResponseField name="500" type="Internal Server Error">
+  Server error occurred
+</ResponseField>
+
+## Rate Limiting
+
+The API implements rate limiting for external service calls:
+
+- **Apify**: Respects actor run quotas
+- **Airtable**: Built-in delays between batch uploads (5 requests/second)
+- **Gender API**: Batch processing with configurable limits
+
+## Environment Variables
+
+Backend API configuration:
+
+```bash .env
+# Supabase
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your-service-role-key
+
+# Apify (Instagram Scraper)
+APIFY_API_KEY=your-apify-key
+APIFY_ACTOR_ID=your-actor-id
+
+# Airtable
+AIRTABLE_API_KEY=your-airtable-key
+AIRTABLE_BASE_ID=your-base-id
+
+# Gender Detection API (optional)
+GENDER_API_KEY=your-gender-api-key
+```
+
+## Available Endpoints
+
+<CardGroup cols={2}>
+  <Card title="Scrape Followers" icon="instagram" href="/api/scrape-followers">
+    Extract followers from Instagram accounts
+  </Card>
+  
+  <Card title="Ingest Profiles" icon="database" href="/api/ingest">
+    Save profiles to database with deduplication
+  </Card>
+  
+  <Card title="Daily Selection" icon="calendar-days" href="/api/daily-selection">
+    Create campaigns and select 14,400 profiles
+  </Card>
+  
+  <Card title="Distribute" icon="users" href="/api/distribute">
+    Distribute profiles to VA tables
+  </Card>
+  
+  <Card title="Airtable Sync" icon="cloud-arrow-up" href="/api/airtable-sync">
+    Sync profiles to Airtable workspace
+  </Card>
+  
+  <Card title="Cleanup" icon="trash" href="/api/cleanup">
+    Clean up expired campaigns
+  </Card>
+</CardGroup>
+
+## Error Handling
+
+Common error scenarios:
+
+### Missing Base ID
+
+```json
+{
+  "success": false,
+  "error": "X-Base-Id header is required"
+}
+```
+
+### Invalid Parameters
+
+```json
+{
+  "success": false,
+  "error": "Invalid request parameters",
+  "details": {
+    "accounts": "Must be a non-empty array"
+  }
+}
+```
+
+### External Service Error
+
+```json
+{
+  "success": false,
+  "error": "Apify scraping failed",
+  "details": {
+    "message": "Actor run timeout",
+    "actorId": "..."
+  }
+}
+```
+
+## Support
+
+For API issues:
+1. Check environment variables are set correctly
+2. Verify external service credentials (Apify, Airtable)
+3. Review backend logs for detailed error messages
+4. Test endpoints with curl or Postman
+5. Ensure database schema is up to date

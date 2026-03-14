@@ -1,0 +1,352 @@
+---
+title: Installation
+description: Complete installation guide for the Click Creators Scraper Client with prerequisites, dependencies, and environment setup
+---
+
+## Prerequisites
+
+Before installing the Click Creators Scraper Client, ensure you have the following installed and configured:
+
+### Required Software
+
+<CardGroup cols={2}>
+  <Card title="Node.js" icon="node-js">
+    **Version 18 or higher** is required
+    
+    Download from [nodejs.org](https://nodejs.org)
+  </Card>
+  
+  <Card title="Package Manager" icon="box">
+    **npm**, **yarn**, or **pnpm**
+    
+    npm is included with Node.js
+  </Card>
+</CardGroup>
+
+### Required Accounts & Services
+
+<Steps>
+  <Step title="Supabase Account">
+    Create a PostgreSQL database at [supabase.com](https://supabase.com)
+    
+    You'll need:
+    - Project URL
+    - Anonymous (anon) key
+    - Service role key (for backend)
+  </Step>
+  
+  <Step title="Apify Account">
+    Sign up at [apify.com](https://apify.com) for Instagram scraping
+    
+    You'll need:
+    - API key
+    - Actor ID for Instagram scraper
+  </Step>
+  
+  <Step title="Airtable Account">
+    Create an account at [airtable.com](https://airtable.com)
+    
+    You'll need:
+    - API key
+    - Base ID for VA workspace
+  </Step>
+</Steps>
+
+<Note>
+The platform supports scraping from Instagram, TikTok, Threads, and X (Twitter), but each requires platform-specific configuration.
+</Note>
+
+---
+
+## Installation Steps
+
+### 1. Clone or Download the Project
+
+Navigate to the client directory:
+
+```bash
+cd client
+```
+
+### 2. Install Dependencies
+
+Choose your preferred package manager:
+
+<CodeGroup>
+```bash npm
+npm install
+```
+
+```bash yarn
+yarn install
+```
+
+```bash pnpm
+pnpm install
+```
+</CodeGroup>
+
+<Tip>
+The installation includes Next.js 14.2.33, React 18, TypeScript, Supabase client, and all required UI components.
+</Tip>
+
+### 3. Environment Configuration
+
+Create your environment variables file:
+
+```bash
+cp .env.example .env.local
+```
+
+Edit `.env.local` with your actual credentials:
+
+```bash .env.local
+# App Configuration
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+# Backend API URL
+NEXT_PUBLIC_API_URL=http://localhost:5001
+
+# Supabase Configuration
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
+
+# Authentication Credentials
+NEXT_PUBLIC_LOGIN_USERNAME=your-username
+NEXT_PUBLIC_LOGIN_PASSWORD=your-password
+NEXT_PUBLIC_LOGIN_OTP=123456
+
+# Campaign Configuration
+NEXT_PUBLIC_DAILY_SELECTION_TARGET=14400
+
+# Source Profiles Management
+NEXT_PUBLIC_DELETE_PASSWORD=delete123
+```
+
+<Warning>
+Never commit your `.env.local` file to version control. Keep your credentials secure.
+</Warning>
+
+#### Environment Variables Reference
+
+| Variable | Description | Example |
+|----------|-------------|----------|
+| `NEXT_PUBLIC_APP_URL` | Frontend application URL | `http://localhost:3000` |
+| `NEXT_PUBLIC_API_URL` | Backend Flask API URL | `http://localhost:5001` |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL | `https://xyz.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anonymous key | Your anon key |
+| `NEXT_PUBLIC_LOGIN_USERNAME` | Login username | `admin` |
+| `NEXT_PUBLIC_LOGIN_PASSWORD` | Login password | Your secure password |
+| `NEXT_PUBLIC_LOGIN_OTP` | 6-digit OTP code | `123456` |
+| `NEXT_PUBLIC_DAILY_SELECTION_TARGET` | Daily profile target | `14400` |
+| `NEXT_PUBLIC_DELETE_PASSWORD` | Password for deleting profiles | `delete123` |
+
+### 4. Database Setup
+
+Set up your Supabase database with the required schema. The application uses the following tables:
+
+<AccordionGroup>
+  <Accordion title="source_profiles" icon="database">
+    Stores Instagram accounts to scrape from
+    
+    ```sql
+    CREATE TABLE source_profiles (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      username TEXT NOT NULL UNIQUE,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    ```
+  </Accordion>
+  
+  <Accordion title="raw_scraped_profiles" icon="database">
+    Stores all scraped Instagram profiles with metadata
+    
+    ```sql
+    CREATE TABLE raw_scraped_profiles (
+      id TEXT PRIMARY KEY,
+      username TEXT,
+      full_name TEXT,
+      follower_count INTEGER,
+      following_count INTEGER,
+      post_count INTEGER,
+      is_verified BOOLEAN,
+      is_private BOOLEAN,
+      biography TEXT,
+      url TEXT,
+      detected_gender TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    ```
+  </Accordion>
+  
+  <Accordion title="global_usernames" icon="database">
+    Deduplicated username pool for campaigns
+    
+    ```sql
+    CREATE TABLE global_usernames (
+      username TEXT PRIMARY KEY,
+      used BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    ```
+  </Accordion>
+  
+  <Accordion title="campaigns" icon="database">
+    Campaign tracking and status
+    
+    ```sql
+    CREATE TABLE campaigns (
+      campaign_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      campaign_date DATE NOT NULL,
+      total_assigned INTEGER NOT NULL,
+      status TEXT CHECK (status IN ('pending', 'success', 'failed')),
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    ```
+  </Accordion>
+  
+  <Accordion title="daily_assignments" icon="database">
+    Profile-to-campaign assignments
+    
+    ```sql
+    CREATE TABLE daily_assignments (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      campaign_id UUID REFERENCES campaigns(campaign_id),
+      username TEXT,
+      va_table_number INTEGER,
+      assigned_at TIMESTAMP DEFAULT NOW()
+    );
+    ```
+  </Accordion>
+  
+  <Accordion title="scraping_jobs" icon="database">
+    Multi-tenant scraping job management
+    
+    ```sql
+    CREATE TABLE scraping_jobs (
+      job_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      influencer_name TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      airtable_base_id TEXT,
+      num_vas INTEGER,
+      status TEXT DEFAULT 'active',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    ```
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+Enable Row Level Security (RLS) in Supabase and configure appropriate policies for the anonymous role.
+</Note>
+
+### 5. Backend API Setup (Optional)
+
+If you're running the Flask backend API locally:
+
+<Steps>
+  <Step title="Navigate to Backend Directory">
+    ```bash
+    cd ../server
+    ```
+  </Step>
+  
+  <Step title="Install Python Dependencies">
+    Requires Python 3.9 or higher
+    
+    ```bash
+    pip install -r requirements.txt
+    ```
+  </Step>
+  
+  <Step title="Configure Backend Environment">
+    Create `.env` file in the server directory:
+    
+    ```bash
+    # Supabase
+    SUPABASE_URL=https://your-project.supabase.co
+    SUPABASE_KEY=your-service-role-key
+    
+    # Apify (Instagram Scraper)
+    APIFY_API_KEY=your-apify-key
+    APIFY_ACTOR_ID=your-actor-id
+    
+    # Airtable
+    AIRTABLE_API_KEY=your-airtable-key
+    AIRTABLE_BASE_ID=your-base-id
+    
+    # Gender Detection API (optional)
+    GENDER_API_KEY=your-gender-api-key
+    ```
+  </Step>
+  
+  <Step title="Start the Backend">
+    ```bash
+    python api.py
+    ```
+    
+    The API will run on `http://localhost:5001`
+  </Step>
+</Steps>
+
+---
+
+## Verify Installation
+
+Run the development server to verify everything is set up correctly:
+
+```bash
+npm run dev
+```
+
+Open your browser and navigate to:
+
+```
+http://localhost:3000
+```
+
+You should see the login page. Navigate to `/callum` to access the authentication page.
+
+<Tip>
+If you encounter any issues, check the [Troubleshooting](/deployment/troubleshooting) guide or verify your environment variables are set correctly.
+</Tip>
+
+---
+
+## Available Scripts
+
+Once installed, you can use these scripts for development and deployment:
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start development server on `localhost:3000` |
+| `npm run build` | Build for production (runs linting first) |
+| `npm run start` | Start production server |
+| `npm run lint` | Run ESLint for code quality |
+| `npm run lint:fix` | Auto-fix ESLint errors |
+| `npm run type-check` | Run TypeScript type checking |
+
+---
+
+## Next Steps
+
+Now that you've installed the Click Creators Scraper Client, proceed to:
+
+<CardGroup cols={2}>
+  <Card title="Quickstart Guide" icon="rocket" href="/quickstart">
+    Run your first scraping job and campaign
+  </Card>
+  
+  <Card title="Authentication" icon="lock" href="/quickstart">
+    Learn about the authentication system
+  </Card>
+  
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Configure scraping jobs and campaigns
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="/api-reference">
+    Explore the backend API endpoints
+  </Card>
+</CardGroup>

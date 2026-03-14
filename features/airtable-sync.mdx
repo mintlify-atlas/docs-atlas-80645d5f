@@ -1,0 +1,595 @@
+---
+title: Airtable Synchronization
+description: Automatically sync distributed profiles to 80 Airtable VA tables with workspace integration and progress tracking
+icon: cloud
+---
+
+## Overview
+
+The Airtable Sync system is the final phase of campaign creation, pushing distributed profiles from Supabase to Airtable tables where virtual assistants can access and process them through the Airtable interface.
+
+<CardGroup cols={2}>
+  <Card title="Automated Sync" icon="arrows-rotate">
+    Automatically syncs all 80 VA tables after distribution completes
+  </Card>
+  <Card title="Workspace Integration" icon="link">
+    Links to dedicated Airtable workspace for each influencer campaign
+  </Card>
+  <Card title="Progress Tracking" icon="gauge">
+    Real-time progress updates during sync operation (66-100%)
+  </Card>
+  <Card title="Error Recovery" icon="shield-check">
+    Handles rate limits and API errors with detailed error messages
+  </Card>
+</CardGroup>
+
+## Airtable Integration Architecture
+
+### Workspace Structure
+
+Each scraping job connects to a dedicated Airtable base in the **AIVS Scraper Workspace**:
+
+```
+AIVS Scraper Workspace (wspQtCYFXE7T72rkW)
+├── {Influencer}'s Instagram Campaign
+│   ├── Table 1 (VA Assistant #1)
+│   ├── Table 2 (VA Assistant #2)
+│   ├── ...
+│   └── Table 80 (VA Assistant #80)
+├── {Influencer}'s TikTok Campaign
+│   ├── Table 1
+│   └── ...
+└── {Influencer}'s Threads Campaign
+    └── ...
+```
+
+Source: `components/airtable-link-dialog.tsx:89-99`
+
+### Base Creation Workflow
+
+<Steps>
+  <Step title="Navigate to Workspace">
+    Open the [AIVS Scraper Workspace](https://airtable.com/workspaces/wspQtCYFXE7T72rkW)
+    
+    Source: `components/airtable-link-dialog.tsx:92-97`
+  </Step>
+  
+  <Step title="Create New Base">
+    Click **"Create"** → **"Build an app on your own"**
+    
+    Source: `components/airtable-link-dialog.tsx:100-101`
+  </Step>
+  
+  <Step title="Name the Base">
+    Rename to match the pattern:
+    
+    ```
+    {influencer_name}'s {platform} Campaign
+    ```
+    
+    Examples:
+    - "John Doe's Instagram Campaign"
+    - "Jane Smith's TikTok Campaign"
+    
+    Source: `components/airtable-link-dialog.tsx:102-106`
+  </Step>
+  
+  <Step title="Copy Base URL">
+    Copy the full URL from browser address bar:
+    
+    ```
+    https://airtable.com/appXXXXXXXXXXXXXX/...
+    ```
+    
+    The system extracts the `base_id` from this URL
+    
+    Source: `components/airtable-link-dialog.tsx:107`
+  </Step>
+</Steps>
+
+## Airtable Link Dialog
+
+### Non-Skippable Requirement
+
+The Airtable link dialog is mandatory during job creation:
+
+```typescript
+interface AirtableLinkDialogProps {
+  open: boolean;              // Dialog visibility
+  onSubmit: (link: string) => void;  // Called with Airtable URL
+  onCancel: () => void;       // Cancel handler
+  influencerName: string;     // Pre-fills naming suggestion
+  platform: string;           // Pre-fills naming suggestion
+}
+```
+
+Source: `components/airtable-link-dialog.tsx:17-23`
+
+### URL Validation
+
+```typescript
+const validateAirtableLink = (link: string): boolean => {
+  // Basic validation for Airtable URL pattern
+  const airtablePattern = /^https?:\/\/(airtable\.com|www\.airtable\.com)\/.+/i;
+  return airtablePattern.test(link);
+};
+
+const handleSubmit = () => {
+  const trimmedLink = airtableLink.trim();
+  
+  if (!trimmedLink) {
+    setError('Airtable link is required');
+    return;
+  }
+
+  if (!validateAirtableLink(trimmedLink)) {
+    setError('Please enter a valid Airtable URL');
+    return;
+  }
+
+  onSubmit(trimmedLink);
+};
+```
+
+Source: `components/airtable-link-dialog.tsx:35-57`
+
+### Dialog UI
+
+```jsx
+<Dialog open={open} onOpenChange={handleCancel}>
+  <DialogContent className="sm:max-w-[600px]">
+    <DialogHeader>
+      <DialogTitle>Connect Airtable Base</DialogTitle>
+      <DialogDescription className="space-y-4 pt-2">
+        <p>Please create a new Airtable base in the <strong>AIVS Scraper Workspace</strong> before proceeding.</p>
+        
+        <div className="space-y-2 text-sm">
+          <p className="font-medium">Follow these steps:</p>
+          <ol className="list-decimal list-inside space-y-1 ml-2">
+            <li>Click on the icon to redirect to the Airtable Workspace</li>
+            <li>Click on "Create"</li>
+            <li>Select "Build an app on your own"</li>
+            <li>Rename the base to:
+              <div className="mt-2 p-2 bg-muted rounded-md font-mono text-xs">
+                {influencerName}'s {platform} Campaign
+              </div>
+            </li>
+            <li>Copy the URL and paste below</li>
+          </ol>
+        </div>
+      </DialogDescription>
+    </DialogHeader>
+    
+    <div className="space-y-4 py-4">
+      <Label htmlFor="airtable-link">Airtable Base Link</Label>
+      <Input
+        id="airtable-link"
+        placeholder="https://airtable.com/..."
+        value={airtableLink}
+        onChange={(e) => setAirtableLink(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+      />
+    </div>
+
+    <DialogFooter>
+      <Button variant="outline" onClick={handleCancel}>Cancel</Button>
+      <Button onClick={handleSubmit} disabled={!airtableLink.trim()}>
+        Submit
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
+```
+
+Source: `components/airtable-link-dialog.tsx:71-146`
+
+## Sync Workflow
+
+### Sync API Endpoint
+
+**Endpoint:** `POST /api/airtable-sync/{campaign_id}`
+
+```typescript
+// Phase 3: Airtable Sync (66% → 100%)
+updateProgress(75, 'syncing');
+
+const syncResult = await apiPost(`/api/airtable-sync/${campaignId}`, baseId);
+
+if (!syncResult.success) {
+  toast({
+    title: "Airtable sync failed",
+    description: syncResult.error || 'Could not sync to Airtable',
+    variant: "destructive"
+  });
+  failAssignment();
+  return;
+}
+
+completeAssignment(profilesPerTableToUse);
+```
+
+Source: `components/payments-table.tsx:154-170`
+
+### API Response
+
+```json
+{
+  "success": true,
+  "campaign_id": "550e8400-e29b-41d4-a716-446655440000",
+  "tables_synced": 80,
+  "total_records": 14400
+}
+```
+
+Source: README.md:449-455
+
+### Sync Progress Indicator
+
+```typescript
+{progressStep === 'syncing' && (
+  <div className="space-y-2">
+    <div className="flex items-center justify-between text-sm">
+      <span className="text-muted-foreground">
+        ☁️ Syncing to Airtable...
+      </span>
+      <span className="font-medium">{progress}%</span>
+    </div>
+    <Progress value={progress} className="h-2" />
+  </div>
+)}
+```
+
+Source: `components/payments-table.tsx:332`
+
+## Airtable Table Structure
+
+### Individual VA Table Schema
+
+Each of the 80 VA tables contains:
+
+```typescript
+interface AirtableRecord {
+  fields: {
+    position: number;           // 1-180 (sequential order)
+    username: string;           // Instagram/TikTok/etc username
+    full_name: string | null;  // Display name
+    profile_id: string;        // Unique identifier
+    status: string;            // 'pending' | 'followed' | 'unfollow' | 'completed'
+    assigned_at: string;       // ISO timestamp
+    campaign_id: string;       // Campaign reference
+  }
+}
+```
+
+### Table Naming Convention
+
+```
+Table 1   → VA Assistant #1
+Table 2   → VA Assistant #2
+...
+Table 80  → VA Assistant #80
+```
+
+Each table is numbered sequentially and contains exactly `profiles_per_table` records (default: 180).
+
+## Base ID Storage
+
+### Scraping Job Association
+
+The Airtable base URL is stored in the `scraping_jobs` table:
+
+```typescript
+interface ScrapingJob {
+  job_id: string;
+  influencer_name: string;
+  platform: Platform;
+  airtable_base_id: string;  // Full Airtable URL stored here
+  base_id: string;           // Extracted for multi-tenant isolation
+  // ...
+}
+```
+
+Source: `types/scraping-jobs.ts:19-29`
+
+### Accessing Base ID in Context
+
+```typescript
+import { useBase } from '@/contexts/base-context';
+
+function Component() {
+  const { airtableBaseId, baseId } = useBase();
+  
+  console.log('Airtable URL:', airtableBaseId);
+  console.log('Base ID for isolation:', baseId);
+}
+```
+
+Source: `contexts/base-context.tsx:206-219`
+
+## Sync Implementation Details
+
+### Rate Limit Handling
+
+Airtable API has rate limits that must be respected:
+
+```
+Rate Limits:
+- 5 requests per second per base
+- Built-in delays between batch uploads
+```
+
+Source: README.md:684
+
+### Batch Upload Strategy
+
+```typescript
+// Conceptual backend implementation
+const syncToAirtable = async (campaignId: string, baseId: string) => {
+  // Get all assignments for this campaign
+  const assignments = await getAssignmentsByCampaign(campaignId, baseId);
+  
+  // Group by VA table number
+  const groupedByVA = groupBy(assignments, 'va_table_number');
+  
+  // Sync each VA table sequentially
+  for (const [tableNumber, records] of Object.entries(groupedByVA)) {
+    await syncTableToAirtable(
+      airtableBaseId,
+      `Table ${tableNumber}`,
+      records
+    );
+    
+    // Rate limit delay
+    await sleep(200);  // 5 requests/second = 200ms delay
+  }
+};
+```
+
+## Error Handling
+
+### Common Sync Errors
+
+<AccordionGroup>
+  <Accordion title="Invalid Airtable URL">
+    **Error:** `Please enter a valid Airtable URL`
+    
+    **Cause:** URL doesn't match Airtable pattern
+    
+    **Solution:** Ensure URL is copied directly from Airtable browser tab:
+    ```
+    ✅ https://airtable.com/appXXXXXXXXXXXXXX/...
+    ❌ airtable.com/...
+    ❌ https://www.notion.com/...
+    ```
+    
+    Source: `components/airtable-link-dialog.tsx:49-52`
+  </Accordion>
+  
+  <Accordion title="Airtable API Authentication Failed">
+    **Error:** `Airtable sync failed: Authentication error`
+    
+    **Cause:** Invalid or expired Airtable API key
+    
+    **Solution:** Verify `AIRTABLE_API_KEY` in backend `.env`:
+    ```bash
+    AIRTABLE_API_KEY=your-airtable-key
+    ```
+    
+    Source: README.md:514-516
+  </Accordion>
+  
+  <Accordion title="Rate Limit Exceeded">
+    **Error:** `Airtable sync failed: Rate limit exceeded`
+    
+    **Cause:** Too many requests to Airtable API
+    
+    **Solution:** Backend should implement exponential backoff:
+    ```typescript
+    const retryWithBackoff = async (fn, maxRetries = 3) => {
+      for (let i = 0; i < maxRetries; i++) {
+        try {
+          return await fn();
+        } catch (error) {
+          if (error.statusCode === 429 && i < maxRetries - 1) {
+            await sleep(Math.pow(2, i) * 1000);  // 1s, 2s, 4s
+            continue;
+          }
+          throw error;
+        }
+      }
+    };
+    ```
+    
+    Source: README.md:623-625
+  </Accordion>
+  
+  <Accordion title="Base Not Found">
+    **Error:** `Airtable sync failed: Base not found`
+    
+    **Cause:** Airtable base was deleted or URL is incorrect
+    
+    **Solution:** 
+    1. Verify base still exists in Airtable workspace
+    2. Update job with new Airtable base URL
+    3. Ensure workspace permissions are correct
+  </Accordion>
+</AccordionGroup>
+
+### Error Recovery
+
+```typescript
+if (!syncResult.success) {
+  toast({
+    title: "Airtable sync failed",
+    description: syncResult.error || 'Could not sync to Airtable',
+    variant: "destructive"
+  });
+  failAssignment();  // Reset progress state
+  
+  // Campaign status is marked as failed
+  await supabase
+    .from('campaigns')
+    .update({ status: false })  // false = failed
+    .eq('campaign_id', campaignId);
+  
+  return;
+}
+```
+
+Source: `components/payments-table.tsx:158-167`
+
+## Environment Configuration
+
+### Backend Environment Variables
+
+```bash
+# Airtable API Configuration
+AIRTABLE_API_KEY=your-airtable-api-key
+AIRTABLE_BASE_ID=your-default-base-id  # Optional fallback
+```
+
+Source: README.md:514-516
+
+### Frontend Environment Variables
+
+```bash
+# No frontend-specific Airtable config needed
+# Base URLs are stored per-job in database
+```
+
+## Monitoring Sync Status
+
+### Real-Time Progress
+
+Monitor sync progress using the global assignment progress context:
+
+```typescript
+import { useAssignmentProgress } from '@/contexts/assignment-progress-context';
+
+function SyncMonitor() {
+  const { progressStep, progress, isAssigning } = useAssignmentProgress();
+  
+  return (
+    <div>
+      {isAssigning && progressStep === 'syncing' && (
+        <div>
+          <p>Syncing to Airtable: {progress}%</p>
+          <Progress value={progress} />
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+Source: Referenced in `components/payments-table.tsx:62-71`
+
+### Campaign Status Verification
+
+```typescript
+// Check if campaign sync completed successfully
+const { data: campaign } = await supabase
+  .from('campaigns')
+  .select('status')
+  .eq('campaign_id', campaignId)
+  .single();
+
+if (campaign.status === true) {
+  console.log('✅ Airtable sync completed successfully');
+} else {
+  console.log('❌ Airtable sync failed');
+}
+```
+
+Source: `components/campaigns-table.tsx:85-96`
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always create base before job creation">
+    Create and name the Airtable base before starting job creation to avoid workflow interruption:
+    
+    1. Navigate to workspace
+    2. Create base with correct naming
+    3. Copy URL immediately
+    4. Have URL ready when creating job
+  </Accordion>
+  
+  <Accordion title="Verify base permissions">
+    Ensure the Airtable API key has proper permissions:
+    
+    - ✅ Create records
+    - ✅ Read records  
+    - ✅ Update records
+    - ✅ Delete records (for cleanup)
+    
+    Test with a small campaign first before large-scale operations.
+  </Accordion>
+  
+  <Accordion title="Monitor rate limits">
+    Keep track of API usage to avoid rate limit errors:
+    
+    ```typescript
+    // Check Airtable API usage
+    const estimatedRequests = Math.ceil(14400 / 10);  // 10 records per request
+    const estimatedTime = estimatedRequests * 0.2;    // 200ms per request
+    
+    console.log(`Estimated sync time: ${estimatedTime}s`);
+    // ~288 seconds = 4.8 minutes for 14,400 records
+    ```
+  </Accordion>
+  
+  <Accordion title="Use meaningful base names">
+    Follow consistent naming convention for easy identification:
+    
+    ```
+    ✅ Good:
+    - "John Doe's Instagram Campaign"
+    - "Nike's TikTok Campaign"
+    
+    ❌ Bad:
+    - "Test"
+    - "Campaign 1"
+    - "Untitled Base"
+    ```
+    
+    This helps VAs quickly identify which campaign they're working on.
+  </Accordion>
+  
+  <Accordion title="Handle sync failures gracefully">
+    Always provide clear error messages and recovery options:
+    
+    ```typescript
+    if (!syncResult.success) {
+      // Log detailed error
+      console.error('Airtable sync failed:', syncResult.error);
+      
+      // Show user-friendly message
+      toast({
+        title: "Sync Failed",
+        description: "Please check Airtable connection and try again.",
+        action: (
+          <Button onClick={() => retrySync(campaignId)}>Retry</Button>
+        )
+      });
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Campaign Management" icon="calendar" href="/features/campaign-management">
+    Understand the complete campaign workflow
+  </Card>
+  <Card title="VA Distribution" icon="users" href="/features/va-distribution">
+    Learn about profile distribution to VAs
+  </Card>
+  <Card title="Scraping Jobs" icon="briefcase" href="/features/scraping-jobs">
+    Explore multi-tenant job management
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/airtable-sync">
+    Complete API documentation for Airtable sync
+  </Card>
+</CardGroup>

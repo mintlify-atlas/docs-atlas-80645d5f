@@ -1,0 +1,418 @@
+---
+title: 'global_usernames Table'
+description: 'Deduplicated username pool with usage tracking'
+icon: 'at'
+---
+
+## Overview
+
+The `global_usernames` table serves as the **deduplicated username pool** for all scraped Instagram profiles. It tracks which usernames have been used in campaigns and provides the available username count for daily assignments.
+
+<Info>
+This table ensures that each username is only assigned once across all campaigns, preventing duplicate outreach to the same users.
+</Info>
+
+## Schema Definition
+
+```sql
+CREATE TABLE global_usernames (
+  id TEXT PRIMARY KEY,  -- Instagram profile ID
+  username TEXT NOT NULL,
+  full_name TEXT,
+  used BOOLEAN DEFAULT FALSE,
+  used_at TIMESTAMPTZ,
+  job_id UUID REFERENCES scraping_jobs(job_id),
+  base_id TEXT NOT NULL,  -- Multi-tenant isolation key
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+## Column Reference
+
+<ResponseField name="id" type="TEXT" required>
+  Primary key - Instagram profile ID from scraped data
+  
+  ```typescript
+  id: string // Instagram's internal profile ID
+  ```
+  
+  <Note>
+  Using Instagram's profile ID as the primary key ensures global uniqueness across all scraping operations.
+  </Note>
+</ResponseField>
+
+<ResponseField name="username" type="TEXT" required>
+  Instagram username (handle without @ symbol)
+  
+  ```typescript
+  username: string // e.g., "john_doe"
+  ```
+</ResponseField>
+
+<ResponseField name="full_name" type="TEXT">
+  User's full name from their Instagram profile
+  
+  ```typescript
+  full_name: string | null // e.g., "John Doe"
+  ```
+  
+  <Note>
+  Used for display purposes in VA assignment tables and gender detection.
+  </Note>
+</ResponseField>
+
+<ResponseField name="used" type="BOOLEAN" default="false">
+  Indicates whether this username has been assigned to a campaign
+  
+  ```typescript
+  used: boolean
+  ```
+  
+  **Usage:**
+  - `false` - Username is available for assignment
+  - `true` - Username has been used in a campaign
+  
+  <Warning>
+  Once set to `true`, the username should not be assigned again to prevent duplicate outreach.
+  </Warning>
+</ResponseField>
+
+<ResponseField name="used_at" type="TIMESTAMPTZ">
+  Timestamp when the username was marked as used
+  
+  ```typescript
+  used_at: string | null // ISO 8601 format
+  ```
+</ResponseField>
+
+<ResponseField name="job_id" type="UUID">
+  Foreign key reference to the scraping job that collected this username
+  
+  ```typescript
+  job_id: string | null // UUID referencing scraping_jobs.job_id
+  ```
+  
+  <Info>
+  Nullable to support legacy data created before multi-tenant migration.
+  </Info>
+</ResponseField>
+
+<ResponseField name="base_id" type="TEXT" required>
+  Multi-tenant isolation key - Links to scraping job's base_id
+  
+  ```typescript
+  base_id: string // e.g., "appXYZ123"
+  ```
+  
+  <Warning>
+  Critical for RLS policies. All queries must filter by base_id to ensure data isolation.
+  </Warning>
+</ResponseField>
+
+<ResponseField name="created_at" type="TIMESTAMPTZ" default="NOW()">
+  Timestamp when the username was first added to the pool
+  
+  ```typescript
+  created_at: string // ISO 8601 format
+  ```
+</ResponseField>
+
+## TypeScript Interface
+
+```typescript
+export interface GlobalUsername {
+  id: string;
+  username: string;
+  full_name: string | null;
+  used: boolean;
+  used_at: string | null;
+  job_id: string | null;
+  base_id: string;
+  created_at: string;
+}
+```
+
+## Indexes and Constraints
+
+```sql
+-- Primary key index (profile ID)
+CREATE INDEX idx_global_usernames_pkey ON global_usernames(id);
+
+-- Username lookup
+CREATE INDEX idx_global_usernames_username ON global_usernames(username);
+
+-- Used status filtering (critical for availability queries)
+CREATE INDEX idx_global_usernames_used ON global_usernames(used);
+
+-- Multi-tenant isolation
+CREATE INDEX idx_global_usernames_base_id ON global_usernames(base_id);
+
+-- Job association
+CREATE INDEX idx_global_usernames_job_id ON global_usernames(job_id);
+
+-- Composite index for available usernames query
+CREATE INDEX idx_global_usernames_base_used ON global_usernames(base_id, used);
+
+-- Foreign key constraint
+ALTER TABLE global_usernames
+  ADD CONSTRAINT fk_global_usernames_job
+  FOREIGN KEY (job_id)
+  REFERENCES scraping_jobs(job_id)
+  ON DELETE SET NULL;
+```
+
+## Common Queries
+
+### Get Available Username Count
+
+```typescript
+import { supabase } from '@/lib/supabase'
+import { getActiveBaseId } from '@/lib/scraping-jobs'
+
+const baseId = await getActiveBaseId()
+const { count } = await supabase
+  .from('global_usernames')
+  .select('*', { count: 'exact', head: true })
+  .eq('base_id', baseId)
+  .eq('used', false)
+
+console.log(`Available usernames: ${count}`)
+```
+
+### Select Unused Usernames for Campaign
+
+```typescript
+const DAILY_TARGET = 14400
+
+const { data: usernames, error } = await supabase
+  .from('global_usernames')
+  .select('id, username, full_name')
+  .eq('base_id', baseId)
+  .eq('used', false)
+  .limit(DAILY_TARGET)
+
+if (usernames && usernames.length >= DAILY_TARGET) {
+  console.log('Sufficient usernames available')
+} else {
+  console.log('Insufficient usernames, need to scrape more')
+}
+```
+
+### Mark Usernames as Used
+
+```typescript
+const usernameIds = ['id1', 'id2', 'id3'] // Profile IDs
+
+const { error } = await supabase
+  .from('global_usernames')
+  .update({
+    used: true,
+    used_at: new Date().toISOString()
+  })
+  .in('id', usernameIds)
+  .eq('base_id', baseId) // Multi-tenant safety
+```
+
+### Add Usernames from Scraping
+
+```typescript
+import { addUsernamesToJob } from '@/lib/scraping-jobs'
+
+const newUsernames = [
+  { id: '123456', username: 'john_doe', full_name: 'John Doe' },
+  { id: '789012', username: 'jane_smith', full_name: 'Jane Smith' }
+]
+
+await addUsernamesToJob(jobId, baseId, newUsernames)
+```
+
+## Usage Tracking
+
+### Campaign Assignment Flow
+
+```typescript
+// 1. Select unused usernames
+const { data: selectedUsernames } = await supabase
+  .from('global_usernames')
+  .select('*')
+  .eq('base_id', baseId)
+  .eq('used', false)
+  .limit(14400)
+
+// 2. Create campaign
+const { data: campaign } = await supabase
+  .from('campaigns')
+  .insert({
+    campaign_date: new Date().toISOString().split('T')[0],
+    total_assigned: selectedUsernames.length,
+    status: 'pending',
+    base_id: baseId
+  })
+  .select()
+  .single()
+
+// 3. Mark usernames as used
+const ids = selectedUsernames.map(u => u.id)
+await supabase
+  .from('global_usernames')
+  .update({ used: true, used_at: new Date().toISOString() })
+  .in('id', ids)
+  .eq('base_id', baseId)
+
+// 4. Create assignments (see daily_assignments table)
+```
+
+## Deduplication Strategy
+
+### Two-Table Architecture
+
+The system uses a two-table strategy for deduplication:
+
+1. **raw_scraped_profiles** (not shown in schema) - Stores all scraped data
+2. **global_usernames** - Deduplicated pool based on Instagram profile ID
+
+```typescript
+// Scraping ingest process
+const scrapedProfiles = [...] // From Apify scraper
+
+// Insert into raw_scraped_profiles (keeps all data)
+await supabase.from('raw_scraped_profiles').insert(scrapedProfiles)
+
+// Deduplicate into global_usernames
+for (const profile of scrapedProfiles) {
+  await supabase
+    .from('global_usernames')
+    .upsert({
+      id: profile.id,
+      username: profile.username,
+      full_name: profile.full_name,
+      job_id: jobId,
+      base_id: baseId
+    }, {
+      onConflict: 'id' // Skip if profile ID already exists
+    })
+}
+```
+
+## Statistics and Monitoring
+
+### Get Job Statistics
+
+```typescript
+import { getJobStatisticsByBaseId } from '@/lib/scraping-jobs'
+
+const stats = await getJobStatisticsByBaseId(baseId)
+
+console.log('Total usernames:', stats.totalUsernames)
+console.log('Available:', stats.availableUsernames)
+console.log('Used:', stats.usedUsernames)
+console.log('Usage rate:', (stats.usedUsernames / stats.totalUsernames * 100).toFixed(2) + '%')
+```
+
+### Username Pool Status
+
+```typescript
+const DAILY_TARGET = 14400
+
+const { count: available } = await supabase
+  .from('global_usernames')
+  .select('*', { count: 'exact', head: true })
+  .eq('base_id', baseId)
+  .eq('used', false)
+
+if (available >= DAILY_TARGET) {
+  console.log('✅ Ready - Sufficient profiles for daily assignment')
+} else {
+  console.log('⚠️ Warning - Need to scrape more profiles')
+  console.log(`Shortfall: ${DAILY_TARGET - available} profiles`)
+}
+```
+
+## Multi-Tenant Isolation
+
+### RLS Policy
+
+```sql
+CREATE POLICY "Isolate global_usernames by base_id"
+  ON global_usernames
+  FOR ALL
+  USING (
+    base_id = current_setting('request.headers')::json->>'x-base-id'
+  );
+
+ALTER TABLE global_usernames ENABLE ROW LEVEL SECURITY;
+```
+
+### Context-Aware Operations
+
+```typescript
+import { createSupabaseClientWithContext } from '@/lib/supabase'
+
+const client = createSupabaseClientWithContext(baseId)
+
+// RLS automatically filters by base_id
+const { data } = await client
+  .from('global_usernames')
+  .select('*')
+  .eq('used', false)
+// Returns only usernames with matching base_id
+```
+
+## Best Practices
+
+<Check>**Use profile ID as primary key** - Ensures global uniqueness across all scraping operations</Check>
+
+<Check>**Check availability before campaign creation** - Verify sufficient unused usernames exist</Check>
+
+<Check>**Mark as used atomically** - Update used flag in same transaction as assignment creation</Check>
+
+<Warning>**Never reset 'used' flag** - Once used, usernames should remain marked to prevent duplicates</Warning>
+
+<Warning>**Always filter by base_id** - Critical for multi-tenant data isolation</Warning>
+
+## Performance Considerations
+
+### Optimized Availability Query
+
+```sql
+-- Use composite index for fast counting
+SELECT COUNT(*)
+FROM global_usernames
+WHERE base_id = 'appXYZ123'
+  AND used = false;
+-- Uses idx_global_usernames_base_used index
+```
+
+### Batch Operations
+
+```typescript
+// Batch insert for better performance
+const BATCH_SIZE = 1000
+
+for (let i = 0; i < usernames.length; i += BATCH_SIZE) {
+  const batch = usernames.slice(i, i + BATCH_SIZE)
+  await supabase.from('global_usernames').insert(batch)
+}
+```
+
+## Sample Data
+
+```sql
+INSERT INTO global_usernames (id, username, full_name, used, job_id, base_id) VALUES
+  ('12345', 'john_doe', 'John Doe', false, 'job-uuid-1', 'appXYZ123'),
+  ('12346', 'jane_smith', 'Jane Smith', false, 'job-uuid-1', 'appXYZ123'),
+  ('12347', 'bob_wilson', 'Bob Wilson', true, 'job-uuid-1', 'appXYZ123'),
+  ('12348', 'alice_jones', 'Alice Jones', false, 'job-uuid-1', 'appXYZ123');
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Daily Assignments" icon="list-check" href="/database/daily-assignments">
+    See how usernames are assigned to VAs
+  </Card>
+  
+  <Card title="Campaigns" icon="calendar" href="/database/campaigns">
+    Learn about campaign creation and tracking
+  </Card>
+</CardGroup>

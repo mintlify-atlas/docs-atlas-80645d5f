@@ -1,0 +1,572 @@
+---
+title: VA Distribution System
+description: Distribute profiles across 80 virtual assistant tables with position tracking and multi-tenant isolation
+icon: users
+---
+
+## Overview
+
+The VA Distribution system automatically divides selected profiles across 80 virtual assistant (VA) tables, ensuring even distribution and tracking each profile's position for ordered workflow execution.
+
+<CardGroup cols={2}>
+  <Card title="Even Distribution" icon="scale-balanced">
+    Automatically distributes profiles evenly across 80 VA tables
+  </Card>
+  <Card title="Position Tracking" icon="list-ol">
+    Maintains sequential position for each profile within VA tables
+  </Card>
+  <Card title="Configurable Allocation" icon="sliders">
+    Customize profiles per VA (default 180) or use fixed amounts
+  </Card>
+  <Card title="Status Management" icon="toggle-on">
+    Track profile lifecycle: pending → followed → unfollow → completed
+  </Card>
+</CardGroup>
+
+## Distribution Architecture
+
+### Daily Assignments Table
+
+Profile assignments are stored with complete tracking metadata:
+
+```sql
+CREATE TABLE daily_assignments (
+  assignment_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  campaign_id UUID REFERENCES campaigns(campaign_id),
+  va_table_number INTEGER NOT NULL,  -- 1-80
+  position INTEGER NOT NULL,          -- Sequential position within VA table
+  id TEXT NOT NULL,                   -- Profile ID from global_usernames
+  username TEXT NOT NULL,
+  full_name TEXT,
+  base_id TEXT NOT NULL,              -- Multi-tenant isolation
+  assigned_at TIMESTAMP DEFAULT NOW(),
+  status TEXT DEFAULT 'pending',      -- 'pending' | 'followed' | 'unfollow' | 'completed'
+  updated_at TIMESTAMP
+);
+```
+
+Source: README.md:333-344
+
+### Assignment Interface
+
+```typescript
+interface DailyAssignment {
+  assignment_id: string;
+  campaign_id: string;
+  va_table_number: number;     // 1-80
+  position: number;            // Sequential order in VA table
+  id: string;                  // Profile identifier
+  username: string;
+  full_name: string | null;
+  assigned_at: string;
+  status: 'pending' | 'followed' | 'unfollow' | 'completed';
+  updated_at: string | null;
+  job_id: string | null;       // References scraping_jobs
+}
+```
+
+Source: `types/scraping-jobs.ts:99-112`
+
+## Distribution Workflow
+
+### Distribution Algorithm
+
+<Steps>
+  <Step title="Calculate Distribution">
+    Determine how many profiles each VA receives:
+    
+    ```typescript
+    const profilesPerTable = 180;  // Configurable
+    const numVAs = 80;
+    const totalProfiles = profilesPerTable * numVAs;  // 14,400
+    ```
+    
+    Source: `components/payments-table.tsx:112`
+  </Step>
+  
+  <Step title="Round-Robin Assignment">
+    Distribute profiles evenly across VA tables:
+    
+    ```typescript
+    // Backend distribution logic (conceptual)
+    const assignments = [];
+    
+    for (let i = 0; i < selectedProfiles.length; i++) {
+      const profile = selectedProfiles[i];
+      const vaTableNumber = (i % 80) + 1;  // Tables 1-80
+      const position = Math.floor(i / 80) + 1;  // Position within table
+      
+      assignments.push({
+        campaign_id: campaignId,
+        id: profile.id,
+        username: profile.username,
+        full_name: profile.full_name,
+        va_table_number: vaTableNumber,
+        position: position,
+        base_id: baseId,
+        status: 'pending'
+      });
+    }
+    ```
+    
+    **Example:** 14,400 profiles → 180 profiles per VA table
+    - Profile 1 → VA Table 1, Position 1
+    - Profile 2 → VA Table 2, Position 1
+    - ...
+    - Profile 80 → VA Table 80, Position 1
+    - Profile 81 → VA Table 1, Position 2
+    - Profile 82 → VA Table 2, Position 2
+  </Step>
+  
+  <Step title="Batch Insert">
+    Insert all assignments in a single database transaction:
+    
+    ```typescript
+    export async function createJobAssignments(
+      jobId: string,
+      campaignId: string,
+      baseId: string,
+      assignments: Array<{
+        id: string;
+        username: string;
+        full_name?: string;
+        va_table_number: number;
+        position: number;
+      }>
+    ): Promise<boolean> {
+      const { error } = await supabase
+        .from('daily_assignments')
+        .insert(
+          assignments.map(a => ({
+            campaign_id: campaignId,
+            id: a.id,
+            username: a.username,
+            full_name: a.full_name || null,
+            va_table_number: a.va_table_number,
+            position: a.position,
+            job_id: jobId,
+            status: 'pending',
+            base_id: baseId
+          }))
+        );
+      
+      return !error;
+    }
+    ```
+    
+    Source: `lib/scraping-jobs.ts:510-555`
+  </Step>
+</Steps>
+
+## VA Table Structure
+
+### Table Numbering
+
+<Card title="80 Virtual Assistant Tables" icon="table">
+  Each VA operates from a dedicated Airtable table numbered 1-80:
+  
+  - **Table 1** - VA Assistant #1
+  - **Table 2** - VA Assistant #2
+  - **...**
+  - **Table 80** - VA Assistant #80
+  
+  Each table contains exactly `profiles_per_table` records (default: 180)
+</Card>
+
+### Position Ordering
+
+Profiles are ordered sequentially within each VA table:
+
+```typescript
+// Query profiles for VA Table 5, ordered by position
+const { data } = await supabase
+  .from('daily_assignments')
+  .select('*')
+  .eq('base_id', baseId)
+  .eq('campaign_id', campaignId)
+  .eq('va_table_number', 5)
+  .order('position', { ascending: true });
+
+// Result:
+// [
+//   { username: 'user1', position: 1, status: 'pending' },
+//   { username: 'user2', position: 2, status: 'pending' },
+//   { username: 'user3', position: 3, status: 'pending' },
+//   ...
+//   { username: 'user180', position: 180, status: 'pending' }
+// ]
+```
+
+## Distribution API
+
+### Distribution Endpoint
+
+**Endpoint:** `POST /api/distribute/{campaign_id}`
+
+```typescript
+// Request
+await apiPost(`/api/distribute/${campaignId}`, baseId, {
+  profiles_per_table: 180  // Optional, defaults to env var
+});
+
+// Response
+{
+  success: true,
+  campaign_id: "550e8400-e29b-41d4-a716-446655440000",
+  va_tables: 80,
+  profiles_per_table: 180,
+  total_distributed: 14400
+}
+```
+
+Source: README.md:432-443 & `components/payments-table.tsx:135-151`
+
+### Distribution Progress
+
+Progress updates during distribution phase (33-66%):
+
+```typescript
+// Start distribution phase
+updateProgress(40, 'distributing');
+
+const distributeResult = await apiPost(
+  `/api/distribute/${campaignId}`, 
+  baseId,
+  { profiles_per_table: profilesPerTableToUse }
+);
+
+if (!distributeResult.success) {
+  toast({
+    title: "Distribution failed",
+    description: distributeResult.error || 'Could not distribute profiles',
+    variant: "destructive"
+  });
+  failAssignment();
+  return;
+}
+
+updateProgress(66, 'distributing');
+```
+
+Source: `components/payments-table.tsx:135-152`
+
+## Assignment Status Tracking
+
+### Status Lifecycle
+
+<Steps>
+  <Step title="pending">
+    Initial state when profile is assigned to VA table
+    
+    - Profile created in `daily_assignments`
+    - Synced to Airtable
+    - Awaiting VA action
+  </Step>
+  
+  <Step title="followed">
+    VA has followed the Instagram account
+    
+    - Status updated by VA or automation
+    - Profile still active in workflow
+  </Step>
+  
+  <Step title="unfollow">
+    VA has unfollowed the account (after engagement period)
+    
+    - Typically 7 days after initial follow
+    - Profile nearing completion
+  </Step>
+  
+  <Step title="completed">
+    Workflow finished for this profile
+    
+    - All actions completed
+    - Profile can be archived or deleted
+  </Step>
+</Steps>
+
+### Status Update Query
+
+```typescript
+// Update assignment status
+await supabase
+  .from('daily_assignments')
+  .update({ 
+    status: 'followed',
+    updated_at: new Date().toISOString()
+  })
+  .eq('assignment_id', assignmentId)
+  .eq('base_id', baseId);
+```
+
+## Multi-Tenant Isolation
+
+### Base ID Filtering
+
+All distribution queries include `base_id` for tenant isolation:
+
+```typescript
+// Get assignments for specific VA table in current job
+const { data } = await supabase
+  .from('daily_assignments')
+  .select('*')
+  .eq('base_id', baseId)              // Multi-tenant filter
+  .eq('campaign_id', campaignId)
+  .eq('va_table_number', tableNumber)
+  .order('position', { ascending: true });
+```
+
+Source: `lib/scraping-jobs.ts:436-453`
+
+### Job-Specific Assignments
+
+Assignments can be retrieved by job ID:
+
+```typescript
+export async function getJobAssignments(
+  jobId: string
+): Promise<DailyAssignment[]> {
+  const { data, error } = await supabase
+    .from('daily_assignments')
+    .select('*')
+    .eq('job_id', jobId)
+    .order('assigned_at', { ascending: false });
+
+  return data || [];
+}
+```
+
+Source: `lib/scraping-jobs.ts:436-454`
+
+## Custom Distribution Configuration
+
+### Fixed 180 Assignment
+
+Fixed distribution of exactly 180 profiles per VA (14,400 total):
+
+```typescript
+const handleFixed180Assignment = () => {
+  setIsFixed180ConfirmOpen(true);
+};
+
+const confirmFixed180Assignment = async () => {
+  // Check availability
+  const { count } = await supabase
+    .from('global_usernames')
+    .select('*', { count: 'exact', head: true })
+    .eq('base_id', baseId)
+    .eq('used', false);
+  
+  const required = 14400;  // 180 × 80
+  
+  if (count < required) {
+    toast({
+      title: "Not enough profiles",
+      description: "Please scrape more profiles first"
+    });
+    return;
+  }
+  
+  // Proceed with fixed assignment
+  handleAssignToVAs(180);
+};
+```
+
+Source: `components/payments-table.tsx:193-238`
+
+### Custom VA Assignment
+
+Flexible distribution with user-defined profiles per VA:
+
+```typescript
+const handleOpenCustomDialog = () => {
+  setCustomProfilesPerTable(defaultProfilesPerTable.toString());
+  setIsDialogOpen(true);
+};
+
+const handleConfirmCustomAssignment = () => {
+  const value = parseInt(customProfilesPerTable);
+  
+  if (isNaN(value) || value <= 0) {
+    toast({
+      title: "Invalid input",
+      description: "Please enter a valid number of profiles per VA."
+    });
+    return;
+  }
+  
+  setIsDialogOpen(false);
+  handleAssignToVAs(value);  // Custom amount
+};
+```
+
+Source: `components/payments-table.tsx:251-271`
+
+### Custom Assignment Dialog
+
+```jsx
+<Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+  <DialogContent>
+    <DialogHeader>
+      <DialogTitle>Edit VA Assignment</DialogTitle>
+      <DialogDescription>
+        Enter the number of profiles each VA should receive.
+      </DialogDescription>
+    </DialogHeader>
+    <div className="grid gap-4 py-4">
+      <div className="grid grid-cols-4 items-center gap-4">
+        <Label htmlFor="profiles-per-table" className="text-right">
+          Profiles per VA
+        </Label>
+        <Input
+          id="profiles-per-table"
+          type="number"
+          min="1"
+          value={customProfilesPerTable}
+          onChange={(e) => setCustomProfilesPerTable(e.target.value)}
+          className="col-span-3"
+        />
+      </div>
+    </div>
+    <DialogFooter>
+      <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+        Cancel
+      </Button>
+      <Button onClick={handleConfirmCustomAssignment}>
+        Confirm
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
+```
+
+Source: `components/payments-table.tsx:393-426`
+
+## Distribution Statistics
+
+### Assignment Counts
+
+Track total assignments per job:
+
+```typescript
+interface JobStatistics {
+  totalAssignments: number;  // Total profiles assigned to VAs
+  // ... other stats
+}
+
+// Get assignment count by base_id
+const { count: totalAssignments } = await supabase
+  .from('daily_assignments')
+  .select('*', { count: 'exact', head: true })
+  .eq('base_id', baseId);
+```
+
+Source: `lib/scraping-jobs.ts:271-274`
+
+### Per-VA Metrics
+
+```typescript
+// Get assignments for a specific VA table
+const { count: vaAssignmentCount } = await supabase
+  .from('daily_assignments')
+  .select('*', { count: 'exact', head: true })
+  .eq('base_id', baseId)
+  .eq('campaign_id', campaignId)
+  .eq('va_table_number', 5);  // VA Table 5
+
+// Expected: 180 (or custom amount)
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Verify even distribution">
+    After distribution, verify each VA table received equal profiles:
+    
+    ```typescript
+    const verifyDistribution = async (campaignId: string, baseId: string) => {
+      const counts = await Promise.all(
+        Array.from({ length: 80 }, async (_, i) => {
+          const vaTable = i + 1;
+          const { count } = await supabase
+            .from('daily_assignments')
+            .select('*', { count: 'exact', head: true })
+            .eq('base_id', baseId)
+            .eq('campaign_id', campaignId)
+            .eq('va_table_number', vaTable);
+          return count;
+        })
+      );
+      
+      // All counts should be equal
+      const allEqual = counts.every(c => c === counts[0]);
+      console.log('Distribution even:', allEqual);
+    };
+    ```
+  </Accordion>
+  
+  <Accordion title="Maintain position ordering">
+    Always query with position ordering for consistent workflow:
+    
+    ```typescript
+    const { data } = await supabase
+      .from('daily_assignments')
+      .select('*')
+      .eq('va_table_number', tableNumber)
+      .order('position', { ascending: true });  // Important!
+    ```
+  </Accordion>
+  
+  <Accordion title="Update status atomically">
+    Use transactions or row-level locks when updating assignment status:
+    
+    ```typescript
+    // Good: Single atomic update
+    await supabase
+      .from('daily_assignments')
+      .update({ status: 'followed', updated_at: NOW() })
+      .eq('assignment_id', id);
+    
+    // Avoid: Read-then-write (race condition)
+    const assignment = await getAssignment(id);
+    assignment.status = 'followed';
+    await updateAssignment(assignment);
+    ```
+  </Accordion>
+  
+  <Accordion title="Include base_id in all queries">
+    Never query assignments without base_id filter:
+    
+    ```typescript
+    // ✅ Correct: Includes base_id
+    await supabase
+      .from('daily_assignments')
+      .select('*')
+      .eq('base_id', baseId)
+      .eq('va_table_number', 5);
+    
+    // ❌ Wrong: Missing base_id (data leak!)
+    await supabase
+      .from('daily_assignments')
+      .select('*')
+      .eq('va_table_number', 5);  // Returns all jobs' data!
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Campaign Management" icon="calendar" href="/features/campaign-management">
+    Learn about the complete campaign workflow
+  </Card>
+  <Card title="Airtable Sync" icon="cloud" href="/features/airtable-sync">
+    Understand how assignments sync to Airtable
+  </Card>
+  <Card title="Scraping Jobs" icon="briefcase" href="/features/scraping-jobs">
+    Explore multi-tenant job management
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/distribute">
+    Complete API documentation for distribution
+  </Card>
+</CardGroup>

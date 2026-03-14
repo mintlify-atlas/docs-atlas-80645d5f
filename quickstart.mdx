@@ -1,80 +1,486 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get started with the Click Creators Scraper Client - from zero to running your first scraping job and campaign in minutes
 ---
 
-## Get started in three steps
+## Overview
 
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+This guide will help you run your first Instagram follower scraping job and create a campaign to distribute profiles to virtual assistants (VAs) via Airtable.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+Before proceeding, ensure you've completed the [Installation](/installation) guide and have all required accounts configured.
 </Note>
+
+---
+
+## Authentication
+
+<Steps>
+  <Step title="Navigate to Login Page">
+    Open your browser and go to:
+    
+    ```
+    http://localhost:3000/callum
+    ```
+  </Step>
+  
+  <Step title="Enter Credentials">
+    Log in using the credentials you configured in `.env.local`:
+    
+    - **Username**: Value from `NEXT_PUBLIC_LOGIN_USERNAME`
+    - **Password**: Value from `NEXT_PUBLIC_LOGIN_PASSWORD`
+    - **OTP**: 6-digit code from `NEXT_PUBLIC_LOGIN_OTP`
+    
+    The OTP field uses a visual input with separators for easy entry.
+  </Step>
+  
+  <Step title="Access Dashboard">
+    After successful login, you'll be redirected to the configuration page at `/configure`
+  </Step>
+</Steps>
+
+<Tip>
+The application uses environment-based authentication. The credentials are defined in your `.env.local` file at `app/callum/page.tsx:52-54`.
+</Tip>
+
+---
+
+## Create Your First Scraping Job
+
+### Step 1: Configure a New Job
+
+From the configuration page (`/configure`), you'll see the **Create Scraping Campaign** card.
+
+<Steps>
+  <Step title="Fill in Job Details">
+    Enter the required information:
+    
+    - **Influencer Name**: The name of the influencer or brand you're tracking
+    - **Platform**: Select from Instagram, TikTok, Threads, or X (Twitter)
+    - **Number of VAs**: How many virtual assistants will process the results
+    
+    Example:
+    ```
+    Influencer Name: Nike
+    Platform: Instagram
+    Number of VAs: 80
+    ```
+  </Step>
+  
+  <Step title="Create Campaign">
+    Click **Create Campaign** button
+    
+    This validates your input and prepares the job for creation.
+  </Step>
+  
+  <Step title="Link Airtable Base">
+    A dialog will appear requesting your Airtable base URL:
+    
+    - Paste the full Airtable base URL (e.g., `https://airtable.com/appXXXXXXXXXXXXXX`)
+    - The system extracts the base ID automatically
+    - This step is **required** and cannot be skipped
+    
+    <Warning>
+    The Airtable base must exist and you must have API access to it. The system will create VA tables (Table 1 through Table N based on your VA count).
+    </Warning>
+  </Step>
+  
+  <Step title="Setup Progress">
+    After submitting the Airtable link:
+    
+    - A progress animation displays for 3 seconds
+    - The system creates the scraping job in Supabase
+    - You're redirected to the job's dashboard
+  </Step>
+</Steps>
+
+### Understanding Job Creation
+
+When you create a job, the system:
+
+1. **Creates a database record** in the `scraping_jobs` table with:
+   - Unique job ID
+   - Influencer name
+   - Platform
+   - Airtable base ID
+   - Number of VAs
+   - Status (default: `active`)
+
+2. **Sets up multi-tenant isolation** using the Airtable base ID as the tenant identifier
+
+3. **Initializes tracking** for usernames, assignments, and campaign statistics
+
+See `lib/scraping-jobs.ts:23-50` for the creation logic.
+
+---
+
+## Add Source Instagram Accounts
+
+### Step 2: Configure Source Profiles
+
+Source profiles are Instagram accounts whose followers you want to scrape.
+
+<Steps>
+  <Step title="Open Edit Source Profiles Dialog">
+    On the dashboard, find the **Dependencies Card** and click **Edit Source Profiles**
+  </Step>
+  
+  <Step title="Add Instagram Accounts">
+    You can add accounts in two formats:
+    
+    **Option 1: Username only**
+    ```
+    nike
+    ```
+    
+    **Option 2: Full Instagram URL**
+    ```
+    https://www.instagram.com/nike
+    ```
+    
+    - Enter the username or URL in the input field
+    - Press **Enter** or click the **+** button
+    - The account is saved to the `source_profiles` table in Supabase
+  </Step>
+  
+  <Step title="Add Multiple Accounts">
+    Repeat the process to add multiple source accounts:
+    
+    Example source accounts:
+    - `nike`
+    - `adidas`
+    - `puma`
+    - `underarmour`
+    
+    <Tip>
+    Add 3-10 source accounts for best results. More accounts = larger follower pool to scrape from.
+    </Tip>
+  </Step>
+  
+  <Step title="Verify Accounts">
+    Your added accounts will display in the dialog with options to remove individual accounts if needed.
+  </Step>
+</Steps>
+
+---
+
+## Run Your First Scraping Job
+
+### Step 3: Scrape Followers
+
+Now that you have source profiles configured, you can scrape their followers.
+
+<Steps>
+  <Step title="Start Scraping">
+    In the Dependencies Card, click the **Find Accounts** button
+    
+    This initiates a two-phase process:
+    1. **Scraping Phase** - Extracts followers from source accounts
+    2. **Ingesting Phase** - Saves results to database
+  </Step>
+  
+  <Step title="Monitor Progress - Scraping Phase (10-50%)">
+    The progress bar shows the scraping phase:
+    
+    - Calls Apify Instagram scraper API
+    - Extracts followers from all source accounts
+    - Applies gender detection (male filtering)
+    - Retrieves profile metadata (username, full name, follower count, etc.)
+    
+    <Info>
+    Scraping speed depends on:
+    - Number of source accounts
+    - Followers per account
+    - Apify API rate limits
+    
+    Typical time: 2-10 minutes for 1000-5000 profiles
+    </Info>
+  </Step>
+  
+  <Step title="Monitor Progress - Ingesting Phase (60-80%)">
+    After scraping completes, auto-ingestion begins:
+    
+    - Saves to `raw_scraped_profiles` table
+    - Deduplicates in `global_usernames` table
+    - Marks profiles as unused (`used = false`)
+    - Associates with your job's base ID for multi-tenant isolation
+    
+    This phase is automatic - no action required!
+  </Step>
+  
+  <Step title="Completion (100%)">
+    When both phases finish:
+    
+    - Success message appears
+    - UI components refresh with new data
+    - Username pool status updates
+    - Scraped profiles appear in the Payments Table
+  </Step>
+</Steps>
+
+### Understanding Scraping Results
+
+The scraping process returns:
+
+```json
+{
+  "success": true,
+  "data": {
+    "accounts": [...],
+    "totalScraped": 1000,
+    "totalFiltered": 450,
+    "genderDistribution": {
+      "male": 450,
+      "female": 400,
+      "unknown": 150
+    }
+  }
+}
+```
+
+- **totalScraped**: Total profiles extracted
+- **totalFiltered**: Profiles matching your criteria (e.g., male-only)
+- **genderDistribution**: Breakdown by detected gender
+
+See API endpoint at `/api/scrape-followers` (README.md:369-394)
+
+---
+
+## Create and Distribute a Campaign
+
+### Step 4: Assign Profiles to VAs
+
+Once you have scraped profiles, create a campaign to distribute them to virtual assistants.
+
+<Steps>
+  <Step title="Verify Username Pool">
+    Check the **Username Status Card** to ensure you have enough profiles:
+    
+    - **Ready (Grey)**: ≥14,400 unused profiles available
+    - **Warning (Red)**: &lt;14,400 profiles - scrape more before creating campaign
+    
+    The daily target is configurable via `NEXT_PUBLIC_DAILY_SELECTION_TARGET`
+  </Step>
+  
+  <Step title="Start Campaign Creation">
+    In the **Payments Table**, click the **Assign to VAs** button
+    
+    This triggers a three-phase workflow:
+    1. Creating Campaign (0-33%)
+    2. Distributing (33-66%)
+    3. Syncing to Airtable (66-100%)
+  </Step>
+  
+  <Step title="Phase 1: Creating Campaign (0-33%)">
+    The system:
+    
+    - Creates a campaign record in the `campaigns` table
+    - Selects 14,400 unused profiles from `global_usernames`
+    - Marks selected profiles as `used = true`
+    - Generates a unique campaign ID
+    
+    API: `POST /api/daily-selection`
+  </Step>
+  
+  <Step title="Phase 2: Distributing (33-66%)">
+    Profiles are distributed across VA tables:
+    
+    - 14,400 profiles ÷ 80 VAs = 180 profiles per VA
+    - Each assignment includes:
+      - Campaign ID
+      - Username
+      - Full name
+      - VA table number (1-80)
+      - Position in table
+    - Records saved to `daily_assignments` table
+    
+    API: `POST /api/distribute/{campaign_id}`
+  </Step>
+  
+  <Step title="Phase 3: Syncing to Airtable (66-100%)">
+    Final synchronization to Airtable:
+    
+    - Pushes profiles to 80 Airtable tables (Table 1 through Table 80)
+    - Each VA can access their assigned profiles in Airtable
+    - Includes batch upload with rate limit handling
+    
+    API: `POST /api/airtable-sync/{campaign_id}`
+    
+    <Tip>
+    VAs access Airtable tables directly - no additional software needed!
+    </Tip>
+  </Step>
+  
+  <Step title="Campaign Complete">
+    When finished:
+    
+    - Success notification appears
+    - Campaign appears in **Campaigns Table** with status:
+      - 🟢 **Green (Success)**: Campaign completed successfully
+      - 🔴 **Red (Failed)**: Campaign failed
+      - ⚪ **Grey (Pending)**: Campaign in progress
+    - Username pool decreases by 14,400
+    - VAs can begin processing profiles
+  </Step>
+</Steps>
+
+### Campaign Lifecycle
+
+- **Duration**: 7 days
+- **Cleanup**: Automated cleanup runs daily at 2 AM via cron job
+- **Cleanup API**: `POST /api/cleanup`
+
+After 7 days, profiles are freed and can be reassigned to new campaigns.
+
+---
+
+## View Campaign History
+
+### Step 5: Monitor Campaigns
+
+The **Campaigns Table** shows all historical campaigns:
+
+- **Campaign Date**: When the campaign was created
+- **Total Assigned**: Number of profiles distributed
+- **Status**: Success, Failed, or Pending
+- **Color Indicators**: Visual status at a glance
+
+Click on any campaign to view detailed statistics and assignments.
+
+---
+
+## Platform-Specific Features
+
+The application supports multiple social media platforms:
+
+### Instagram Jobs
+Path: `/instagram-jobs`
+- Follower scraping
+- Gender detection
+- Profile metadata extraction
+
+### TikTok Jobs
+Path: `/tiktok-jobs`
+- Follower scraping
+- Cost: $2.00 per 1,000 profiles
+
+### Threads Jobs
+Path: `/threads-jobs`
+- Follower scraping
+- Cost: $1.55 per 1,000 profiles
+
+### X (Twitter) Jobs
+Path: `/x-jobs`
+- Follower scraping
+- Cost: $0.15 per 1,000 profiles
+
+---
+
+## Key Metrics
+
+Understand the system's capacity:
+
+| Metric | Value |
+|--------|-------|
+| **Daily Target** | 14,400 unique profiles |
+| **VA Count** | 80 virtual assistants (configurable) |
+| **Profiles per VA** | 180 per day |
+| **Campaign Lifecycle** | 7 days |
+| **Weekly Capacity** | 1.008M profiles |
+
+These values are configurable based on your business needs.
+
+---
+
+## Troubleshooting Quick Tips
+
+<AccordionGroup>
+  <Accordion title="Scraping Failed">
+    **Possible causes:**
+    - Backend API not running
+    - Invalid Apify API key
+    - Source accounts are private
+    - Apify quota exceeded
+    
+    **Solutions:**
+    1. Verify backend is running at `http://localhost:5001`
+    2. Check `.env` file for valid Apify credentials
+    3. Ensure source accounts are public
+    4. Check Apify dashboard for remaining credits
+  </Accordion>
+  
+  <Accordion title="Campaign Creation Failed">
+    **Possible causes:**
+    - Insufficient profiles (&lt;14,400)
+    - Database connection error
+    - Invalid campaign configuration
+    
+    **Solutions:**
+    1. Run scraping to add more profiles
+    2. Check Supabase connection
+    3. Verify `NEXT_PUBLIC_DAILY_SELECTION_TARGET` is set
+    
+    Query to check available profiles:
+    ```sql
+    SELECT COUNT(*) FROM global_usernames WHERE used = false;
+    ```
+  </Accordion>
+  
+  <Accordion title="Airtable Sync Failed">
+    **Possible causes:**
+    - Invalid Airtable API key
+    - Incorrect base ID
+    - API rate limits exceeded
+    - VA tables don't exist
+    
+    **Solutions:**
+    1. Verify Airtable API key in backend `.env`
+    2. Confirm base ID matches your Airtable base
+    3. Wait for rate limits to reset (typically 5 seconds)
+    4. Ensure VA tables are created (Table 1 - Table 80)
+  </Accordion>
+  
+  <Accordion title="Cannot Connect to Supabase">
+    **Possible causes:**
+    - Invalid Supabase credentials
+    - RLS policies blocking access
+    - Supabase project paused
+    
+    **Solutions:**
+    1. Verify `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+    2. Check RLS policies allow anonymous access
+    3. Ensure Supabase project is active (not paused)
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Next Steps
+
+Congratulations! You've successfully:
+
+✅ Authenticated to the platform  
+✅ Created a scraping job  
+✅ Added source Instagram accounts  
+✅ Scraped followers with gender filtering  
+✅ Created and distributed a campaign to VAs  
+
+Explore more features:
+
+<CardGroup cols={2}>
+  <Card title="Configuration Guide" icon="gear" href="/configuration">
+    Advanced job and campaign configuration
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="/api-reference">
+    Complete backend API documentation
+  </Card>
+  
+  <Card title="Database Schema" icon="database" href="/database/overview">
+    Understand the data model
+  </Card>
+  
+  <Card title="Deployment" icon="rocket" href="/deployment">
+    Deploy to production
+  </Card>
+</CardGroup>

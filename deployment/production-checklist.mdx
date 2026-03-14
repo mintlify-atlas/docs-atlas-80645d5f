@@ -1,0 +1,586 @@
+---
+title: 'Production Checklist'
+description: 'Complete pre-deployment checklist for production readiness'
+icon: 'list-check'
+---
+
+## Overview
+
+Use this checklist to ensure your application is production-ready before deploying. Each item is critical for security, performance, and reliability.
+
+<Warning>
+  Do not skip any items in this checklist. Production issues are expensive and time-consuming to fix.
+</Warning>
+
+## Pre-Deployment Checklist
+
+### Code Quality
+
+<Steps>
+  <Step title="Run Type Checking">
+    Verify TypeScript types are correct:
+    
+    ```bash
+    npm run type-check
+    ```
+    
+    Expected output:
+    ```bash
+    > tsc --noEmit
+    # No errors should appear
+    ```
+    
+    <Warning>
+      Fix all TypeScript errors before deploying. Type errors can cause runtime failures.
+    </Warning>
+  </Step>
+  
+  <Step title="Run Linting">
+    Check code quality with ESLint:
+    
+    ```bash
+    npm run lint
+    ```
+    
+    Fix any errors automatically:
+    
+    ```bash
+    npm run lint:fix
+    ```
+    
+    <Info>
+      The build command includes linting (`next lint && next build`), so builds will fail if linting errors exist.
+    </Info>
+  </Step>
+  
+  <Step title="Test Production Build">
+    Build and test locally before deploying:
+    
+    ```bash
+    # Build for production
+    npm run build
+    
+    # Start production server
+    npm run start
+    
+    # Open http://localhost:3000
+    ```
+    
+    Verify:
+    - ✅ Build completes without errors
+    - ✅ Application loads correctly
+    - ✅ All routes are accessible
+    - ✅ No console errors in browser
+  </Step>
+  
+  <Step title="Remove Development Code">
+    Remove or comment out:
+    - `console.log()` statements (except critical errors)
+    - Debug code and test data
+    - Commented-out code blocks
+    - Development-only features
+    
+    <Tip>
+      Use `.env.local` variables to conditionally enable debug features:
+      ```typescript
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Debug info:', data);
+      }
+      ```
+    </Tip>
+  </Step>
+</Steps>
+
+### Environment Configuration
+
+<Steps>
+  <Step title="Verify Environment Variables">
+    Create production `.env.local` with all required variables:
+    
+    <AccordionGroup>
+      <Accordion title="Required Frontend Variables">
+        ```bash .env.local
+        # App Configuration
+        NEXT_PUBLIC_APP_URL=https://your-production-domain.com
+        NEXT_PUBLIC_API_URL=https://your-backend-api.com
+        
+        # Supabase
+        NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+        NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        
+        # Authentication
+        NEXT_PUBLIC_USERNAME=production-username
+        NEXT_PUBLIC_PASSWORD=strong-production-password
+        NEXT_PUBLIC_OTP=654321
+        NEXT_PUBLIC_DELETE_PASSWORD=strong-delete-password
+        
+        # Campaign Settings
+        NEXT_PUBLIC_DAILY_SELECTION_TARGET=14400
+        ```
+      </Accordion>
+      
+      <Accordion title="Required Backend Variables">
+        ```bash .env
+        # Supabase
+        SUPABASE_URL=https://xxx.supabase.co
+        SUPABASE_KEY=your-service-role-key-here
+        
+        # Apify
+        APIFY_API_KEY=your-production-apify-key
+        APIFY_ACTOR_ID=your-actor-id
+        
+        # Airtable
+        AIRTABLE_API_KEY=your-production-airtable-key
+        AIRTABLE_BASE_ID=your-production-base-id
+        
+        # Optional: Gender Detection
+        GENDER_API_KEY=your-gender-api-key
+        ```
+      </Accordion>
+    </AccordionGroup>
+    
+    <Warning>
+      Never commit `.env` or `.env.local` files to git. Add them to `.gitignore`.
+    </Warning>
+  </Step>
+  
+  <Step title="Update Production URLs">
+    Replace all development URLs:
+    
+    ```bash
+    # Before (development)
+    NEXT_PUBLIC_APP_URL=http://localhost:3000
+    NEXT_PUBLIC_API_URL=http://localhost:5001
+    
+    # After (production)
+    NEXT_PUBLIC_APP_URL=https://your-app.vercel.app
+    NEXT_PUBLIC_API_URL=https://api.yourdomain.com
+    ```
+  </Step>
+  
+  <Step title="Use Strong Credentials">
+    Update authentication credentials for production:
+    
+    ```bash
+    # ❌ Development (weak)
+    NEXT_PUBLIC_USERNAME=admin
+    NEXT_PUBLIC_PASSWORD=password123
+    NEXT_PUBLIC_OTP=123456
+    
+    # ✅ Production (strong)
+    NEXT_PUBLIC_USERNAME=production_admin_2024
+    NEXT_PUBLIC_PASSWORD=kJ8#mN2$pL9@qR5
+    NEXT_PUBLIC_OTP=847291
+    ```
+    
+    <Warning>
+      These environment variables are exposed to the browser. For production apps, implement proper authentication using NextAuth.js or Supabase Auth.
+    </Warning>
+  </Step>
+</Steps>
+
+### Database Setup
+
+<Steps>
+  <Step title="Create Production Database">
+    Set up a dedicated Supabase project for production:
+    
+    1. Create new project at [supabase.com](https://supabase.com)
+    2. Choose a production-grade plan (not free tier for high traffic)
+    3. Select a region close to your users
+    4. Save database password securely
+  </Step>
+  
+  <Step title="Run Database Migrations">
+    Execute all SQL schema files in Supabase SQL Editor:
+    
+    ```sql
+    -- 1. source_profiles table
+    CREATE TABLE source_profiles (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      username TEXT NOT NULL UNIQUE,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    -- 2. raw_scraped_profiles table
+    CREATE TABLE raw_scraped_profiles (
+      id TEXT PRIMARY KEY,
+      username TEXT,
+      full_name TEXT,
+      follower_count INTEGER,
+      following_count INTEGER,
+      post_count INTEGER,
+      is_verified BOOLEAN,
+      is_private BOOLEAN,
+      biography TEXT,
+      url TEXT,
+      detected_gender TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    -- 3. global_usernames table
+    CREATE TABLE global_usernames (
+      username TEXT PRIMARY KEY,
+      used BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    -- 4. campaigns table
+    CREATE TABLE campaigns (
+      campaign_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      campaign_date DATE NOT NULL,
+      total_assigned INTEGER NOT NULL,
+      status TEXT CHECK (status IN ('pending', 'success', 'failed')),
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    -- 5. daily_assignments table
+    CREATE TABLE daily_assignments (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      campaign_id UUID REFERENCES campaigns(campaign_id),
+      username TEXT,
+      va_table_number INTEGER,
+      assigned_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    -- 6. scraping_jobs table
+    CREATE TABLE scraping_jobs (
+      job_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      influencer_name TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      airtable_base_id TEXT,
+      num_vas INTEGER,
+      status TEXT DEFAULT 'active',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    ```
+  </Step>
+  
+  <Step title="Configure Row Level Security">
+    Enable RLS policies for secure access:
+    
+    ```sql
+    -- Enable RLS on all tables
+    ALTER TABLE source_profiles ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE raw_scraped_profiles ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE global_usernames ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE daily_assignments ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE scraping_jobs ENABLE ROW LEVEL SECURITY;
+    
+    -- Create policies for anon role (adjust based on your security needs)
+    CREATE POLICY "Enable read access for all users" ON source_profiles
+      FOR SELECT USING (true);
+    
+    CREATE POLICY "Enable insert for all users" ON source_profiles
+      FOR INSERT WITH CHECK (true);
+    
+    -- Repeat for other tables based on your access requirements
+    ```
+    
+    <Warning>
+      The example policies above are permissive. Implement stricter RLS policies based on your security requirements.
+    </Warning>
+  </Step>
+  
+  <Step title="Test Database Connection">
+    Verify connection from your application:
+    
+    ```typescript
+    import { createClient } from '@supabase/supabase-js';
+    
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+    
+    // Test query
+    const { data, error } = await supabase
+      .from('source_profiles')
+      .select('*')
+      .limit(1);
+    
+    if (error) {
+      console.error('Database connection failed:', error);
+    } else {
+      console.log('Database connected successfully');
+    }
+    ```
+  </Step>
+  
+  <Step title="Set Up Database Backups">
+    Configure automatic backups in Supabase:
+    
+    1. Go to project "Settings" → "Database"
+    2. Enable "Point-in-Time Recovery" (PITR)
+    3. Configure backup retention period
+    4. Test restore process
+  </Step>
+</Steps>
+
+### External Services
+
+<Steps>
+  <Step title="Configure Supabase">
+    Production settings:
+    
+    - ✅ Enable Point-in-Time Recovery
+    - ✅ Set up database backups
+    - ✅ Configure connection pooling
+    - ✅ Enable RLS policies
+    - ✅ Use service role key only on backend
+  </Step>
+  
+  <Step title="Configure Apify">
+    Instagram scraping setup:
+    
+    - ✅ Use production API key
+    - ✅ Verify actor ID is correct
+    - ✅ Check actor run quota/limits
+    - ✅ Test scraping with production credentials
+    - ✅ Configure error notifications
+  </Step>
+  
+  <Step title="Configure Airtable">
+    VA workspace setup:
+    
+    - ✅ Create production Airtable base
+    - ✅ Set up 80 VA tables (Table 1 - Table 80)
+    - ✅ Use production API key
+    - ✅ Configure table schemas
+    - ✅ Test API sync with sample data
+  </Step>
+  
+  <Step title="Set Up Monitoring">
+    Configure monitoring services:
+    
+    - ✅ Enable Vercel Analytics
+    - ✅ Set up error tracking (Sentry, LogRocket)
+    - ✅ Configure uptime monitoring (UptimeRobot, Pingdom)
+    - ✅ Set up alert notifications
+  </Step>
+</Steps>
+
+### Security Hardening
+
+<Steps>
+  <Step title="Enable HTTPS Only">
+    Ensure all traffic uses HTTPS:
+    
+    ```javascript next.config.mjs
+    const nextConfig = {
+      async headers() {
+        return [
+          {
+            source: '/:path*',
+            headers: [
+              {
+                key: 'Strict-Transport-Security',
+                value: 'max-age=31536000; includeSubDomains'
+              },
+            ],
+          },
+        ];
+      },
+    };
+    ```
+  </Step>
+  
+  <Step title="Configure CORS">
+    Restrict API access to your frontend domain:
+    
+    ```python Flask Backend
+    from flask_cors import CORS
+    
+    app = Flask(__name__)
+    CORS(app, origins=[
+        'https://your-production-domain.com',
+        'https://your-app.vercel.app'
+    ])
+    ```
+  </Step>
+  
+  <Step title="Rotate API Keys">
+    Create fresh API keys for production:
+    
+    - ✅ Supabase: Generate new anon and service role keys
+    - ✅ Apify: Create production-only API key
+    - ✅ Airtable: Generate new API token
+    - ✅ Store all keys in environment variables
+    - ✅ Never reuse development keys
+  </Step>
+  
+  <Step title="Review Code for Secrets">
+    Scan codebase for hardcoded secrets:
+    
+    ```bash
+    # Search for potential secrets
+    grep -r "api_key" .
+    grep -r "password" .
+    grep -r "secret" .
+    grep -r "token" .
+    ```
+    
+    <Warning>
+      Remove any hardcoded credentials and use environment variables instead.
+    </Warning>
+  </Step>
+</Steps>
+
+### Performance Optimization
+
+<Steps>
+  <Step title="Optimize Images">
+    Although image optimization is disabled, ensure images are:
+    
+    - ✅ Compressed (use tools like TinyPNG)
+    - ✅ Properly sized (not oversized)
+    - ✅ Using modern formats (WebP when possible)
+  </Step>
+  
+  <Step title="Enable Caching">
+    Configure appropriate caching headers:
+    
+    ```javascript next.config.mjs
+    const nextConfig = {
+      async headers() {
+        return [
+          {
+            source: '/_next/static/:path*',
+            headers: [
+              {
+                key: 'Cache-Control',
+                value: 'public, max-age=31536000, immutable',
+              },
+            ],
+          },
+        ];
+      },
+    };
+    ```
+  </Step>
+  
+  <Step title="Test Performance">
+    Run performance audits:
+    
+    ```bash
+    # Build and analyze
+    npm run build
+    
+    # Check bundle size
+    # Look for large bundles in build output
+    ```
+    
+    Use Lighthouse to audit:
+    - ✅ Performance score > 90
+    - ✅ Accessibility score > 90
+    - ✅ Best Practices score > 90
+    - ✅ SEO score > 90
+  </Step>
+</Steps>
+
+### Documentation and Monitoring
+
+<Steps>
+  <Step title="Document Deployment Process">
+    Create internal documentation:
+    
+    - ✅ Deployment procedures
+    - ✅ Environment variable list
+    - ✅ Database schema and migrations
+    - ✅ API endpoint documentation
+    - ✅ Troubleshooting guide
+  </Step>
+  
+  <Step title="Set Up Alerts">
+    Configure automated alerts for:
+    
+    - ✅ Application errors (>10 errors/hour)
+    - ✅ API failures (>5% error rate)
+    - ✅ Database connection issues
+    - ✅ High response times (>2 seconds)
+    - ✅ Deployment failures
+  </Step>
+  
+  <Step title="Create Runbook">
+    Document incident response procedures:
+    
+    - ✅ How to rollback deployment
+    - ✅ Database restore process
+    - ✅ Emergency contacts
+    - ✅ Critical API endpoints to monitor
+    - ✅ Common issues and fixes
+  </Step>
+</Steps>
+
+## Final Verification
+
+Before deploying to production, complete this final checklist:
+
+<Accordion title="Final Checklist">
+  - [ ] All TypeScript errors resolved
+  - [ ] All linting errors fixed
+  - [ ] Production build succeeds locally
+  - [ ] All environment variables configured
+  - [ ] Database tables created and tested
+  - [ ] RLS policies enabled and tested
+  - [ ] External services configured (Apify, Airtable)
+  - [ ] HTTPS enabled and enforced
+  - [ ] CORS configured correctly
+  - [ ] API keys rotated for production
+  - [ ] No hardcoded secrets in code
+  - [ ] Performance optimized (Lighthouse >90)
+  - [ ] Monitoring and alerts configured
+  - [ ] Documentation updated
+  - [ ] Backup and restore tested
+  - [ ] Incident response plan documented
+</Accordion>
+
+<Warning>
+  Do not deploy if any item in the final checklist is incomplete.
+</Warning>
+
+## Post-Deployment Steps
+
+After successful deployment:
+
+<Steps>
+  <Step title="Verify Application">
+    Test all critical workflows:
+    - User authentication
+    - Source profile management
+    - Scraping workflow
+    - Campaign creation
+    - VA assignment
+    - Airtable synchronization
+  </Step>
+  
+  <Step title="Monitor Metrics">
+    Watch for issues in first 24 hours:
+    - Error rates
+    - Response times
+    - Database performance
+    - API quota usage
+  </Step>
+  
+  <Step title="Enable Scheduled Tasks">
+    Set up cron jobs for maintenance:
+    
+    ```bash
+    # Cleanup 7-day old campaigns (daily at 2 AM)
+    0 2 * * * curl -X POST https://your-api.com/api/cleanup
+    ```
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Vercel Deployment" icon="rocket" href="/deployment/vercel">
+    Deploy your application to Vercel
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/deployment/troubleshooting">
+    Common deployment issues
+  </Card>
+</CardGroup>

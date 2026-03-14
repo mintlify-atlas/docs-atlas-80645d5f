@@ -1,0 +1,450 @@
+---
+title: 'POST /api/airtable-sync/{campaign_id}'
+description: 'Sync campaign profiles to Airtable VA workspace'
+icon: 'cloud-arrow-up'
+---
+
+## Endpoint
+
+<CodeGroup>
+```bash cURL
+curl -X POST http://localhost:5001/api/airtable-sync/550e8400-e29b-41d4-a716-446655440000 \
+  -H "X-Base-Id: your-base-id" \
+  -H "Content-Type: application/json"
+```
+
+```typescript TypeScript
+import { apiPost } from '@/lib/api'
+import { useBase } from '@/contexts/base-context'
+
+const { baseId } = useBase()
+const campaignId = '550e8400-e29b-41d4-a716-446655440000'
+
+const response = await apiPost(
+  `/api/airtable-sync/${campaignId}`,
+  baseId
+)
+```
+
+```javascript JavaScript
+const campaignId = '550e8400-e29b-41d4-a716-446655440000'
+
+const response = await fetch(
+  `http://localhost:5001/api/airtable-sync/${campaignId}`,
+  {
+    method: 'POST',
+    headers: {
+      'X-Base-Id': 'your-base-id',
+      'Content-Type': 'application/json'
+    }
+  }
+)
+
+const data = await response.json()
+```
+</CodeGroup>
+
+## Description
+
+Syncs distributed profiles to Airtable VA workspace, pushing 180 profiles to each of 80 VA tables. This is the final step in the campaign workflow.
+
+This endpoint:
+1. Retrieves campaign assignments from `daily_assignments` table
+2. Groups profiles by VA table number
+3. Pushes profiles to corresponding Airtable tables (Table 1 - Table 80)
+4. Updates campaign status to `success` or `failed`
+5. Returns sync statistics
+
+<Info>
+  Airtable API rate limits are handled automatically with built-in delays between batch uploads.
+</Info>
+
+## Request Headers
+
+<ParamField header="X-Base-Id" type="string" required>
+  Airtable base identifier for multi-tenant isolation
+</ParamField>
+
+<ParamField header="Content-Type" type="string" default="application/json">
+  Must be `application/json`
+</ParamField>
+
+## Path Parameters
+
+<ParamField path="campaign_id" type="string" required>
+  UUID of the campaign to sync (from `/api/daily-selection` response)
+  
+  **Example:** `550e8400-e29b-41d4-a716-446655440000`
+</ParamField>
+
+## Request Body
+
+This endpoint does not require a request body.
+
+## Response Fields
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if sync completed successfully
+</ResponseField>
+
+<ResponseField name="campaign_id" type="string" required>
+  UUID of the synced campaign
+</ResponseField>
+
+<ResponseField name="tables_synced" type="number" required>
+  Number of Airtable tables successfully synced (up to 80)
+</ResponseField>
+
+<ResponseField name="total_records" type="number" required>
+  Total number of records pushed to Airtable (up to 14,400)
+</ResponseField>
+
+## Response Example
+
+### Success Response (200 OK)
+
+```json
+{
+  "success": true,
+  "campaign_id": "550e8400-e29b-41d4-a716-446655440000",
+  "tables_synced": 80,
+  "total_records": 14400
+}
+```
+
+### Partial Success Response (200 OK)
+
+```json
+{
+  "success": true,
+  "campaign_id": "550e8400-e29b-41d4-a716-446655440000",
+  "tables_synced": 75,
+  "total_records": 13500,
+  "warnings": [
+    {
+      "table": "Table 76",
+      "error": "Rate limit exceeded, retried successfully"
+    }
+  ]
+}
+```
+
+### Error Response (404 Not Found)
+
+```json
+{
+  "success": false,
+  "error": "Campaign not found",
+  "details": {
+    "campaign_id": "550e8400-e29b-41d4-a716-446655440000"
+  }
+}
+```
+
+### Error Response (400 Bad Request)
+
+```json
+{
+  "success": false,
+  "error": "Campaign not distributed yet",
+  "details": {
+    "campaign_id": "550e8400-e29b-41d4-a716-446655440000",
+    "assignments_found": 0
+  }
+}
+```
+
+### Error Response (401 Unauthorized)
+
+```json
+{
+  "success": false,
+  "error": "X-Base-Id header is required"
+}
+```
+
+### Error Response (500 Internal Server Error)
+
+```json
+{
+  "success": false,
+  "error": "Airtable sync failed",
+  "details": {
+    "message": "Invalid API key",
+    "tables_synced": 45,
+    "total_records": 8100
+  }
+}
+```
+
+## Airtable Integration
+
+### Required Configuration
+
+Set Airtable credentials in backend environment:
+
+```bash .env
+AIRTABLE_API_KEY=your-airtable-key
+AIRTABLE_BASE_ID=your-base-id
+```
+
+### Table Structure
+
+Airtable workspace must have 80 tables named:
+- `Table 1`
+- `Table 2`
+- ...
+- `Table 80`
+
+Each table should have these fields:
+- `Username` (Single line text)
+- `Profile URL` (URL)
+- `Assigned Date` (Date)
+- `Status` (Single select: Pending, In Progress, Completed)
+
+### Rate Limiting
+
+Airtable API has the following rate limits:
+- **5 requests per second** per base
+- **100,000 requests per day** per workspace
+
+The sync endpoint handles rate limiting with:
+- Built-in delays (200ms between requests)
+- Automatic retry on rate limit errors (429)
+- Batch processing (10 records per request)
+
+## Sync Logic
+
+Profiles are synced using batch processing:
+
+```typescript
+// Pseudo-code for Airtable sync
+const syncToAirtable = async (campaignId: string, baseId: string) => {
+  // 1. Get assignments grouped by VA table
+  const assignments = await getAssignmentsByVA(campaignId)
+
+  // 2. Sync each VA table
+  for (const [vaNumber, profiles] of assignments) {
+    const tableName = `Table ${vaNumber}`
+    
+    // 3. Batch profiles in groups of 10
+    const batches = chunkArray(profiles, 10)
+    
+    for (const batch of batches) {
+      // 4. Create Airtable records
+      await airtable.base(baseId)(tableName).create(
+        batch.map(p => ({
+          fields: {
+            Username: p.username,
+            'Profile URL': `https://instagram.com/${p.username}`,
+            'Assigned Date': new Date().toISOString(),
+            Status: 'Pending'
+          }
+        }))
+      )
+      
+      // 5. Delay to respect rate limits
+      await delay(200)
+    }
+  }
+}
+```
+
+## Campaign Workflow
+
+This endpoint is the final step in the campaign workflow:
+
+```typescript
+const runCampaignWorkflow = async () => {
+  // Step 1: Create campaign and select profiles
+  const selectionResponse = await apiPost('/api/daily-selection', baseId)
+  const { campaign_id } = selectionResponse
+
+  // Step 2: Distribute to VA tables
+  await apiPost(`/api/distribute/${campaign_id}`, baseId)
+
+  // Step 3: Sync to Airtable (final step)
+  const syncResponse = await apiPost(
+    `/api/airtable-sync/${campaign_id}`,
+    baseId
+  )
+
+  if (syncResponse.success) {
+    console.log('Campaign completed successfully!')
+    console.log(`Synced ${syncResponse.total_records} profiles to Airtable`)
+  }
+}
+```
+
+## Performance Considerations
+
+<Warning>
+  Airtable sync is the slowest operation in the workflow:
+  - **80 tables** × **18 batches** = 1,440 API requests
+  - With 200ms delays: ~5 minutes total
+  
+  Display progress updates to users during sync.
+</Warning>
+
+**Optimization Tips:**
+- Use batch sizes of 10 records (Airtable maximum)
+- Implement exponential backoff on rate limit errors
+- Parallelize syncs across multiple tables (with caution)
+- Monitor Airtable API quota usage
+
+## Error Handling
+
+Common error scenarios:
+
+### Invalid Airtable Credentials
+
+**Cause:** Invalid API key or base ID
+
+**Solution:** Verify `AIRTABLE_API_KEY` and base ID in environment variables
+
+### Table Not Found
+
+**Cause:** Airtable base missing required tables (Table 1 - Table 80)
+
+**Solution:** Create all 80 tables in Airtable base
+
+### Rate Limit Exceeded
+
+**Cause:** Too many requests in short period
+
+**Solution:** Endpoint automatically retries with exponential backoff
+
+### Field Mismatch
+
+**Cause:** Airtable table schema doesn't match expected fields
+
+**Solution:** Ensure tables have `Username`, `Profile URL`, `Assigned Date`, `Status` fields
+
+## Monitoring Sync Progress
+
+Track sync progress in real-time:
+
+```typescript
+// Frontend progress tracking
+const syncWithProgress = async (campaignId: string) => {
+  const eventSource = new EventSource(
+    `${apiUrl}/api/airtable-sync/${campaignId}/stream`
+  )
+
+  eventSource.onmessage = (event) => {
+    const data = JSON.parse(event.data)
+    console.log(`Progress: ${data.tables_synced}/80 tables`)
+    console.log(`Records: ${data.total_records}/14400`)
+  }
+
+  eventSource.onerror = () => {
+    eventSource.close()
+  }
+}
+```
+
+## Campaign Status Updates
+
+The endpoint updates campaign status in the `campaigns` table:
+
+```sql
+-- On success
+UPDATE campaigns
+SET status = 'success'
+WHERE campaign_id = '550e8400-e29b-41d4-a716-446655440000';
+
+-- On failure
+UPDATE campaigns
+SET status = 'failed'
+WHERE campaign_id = '550e8400-e29b-41d4-a716-446655440000';
+```
+
+View campaign status in frontend:
+
+```typescript
+const { data: campaign } = await supabase
+  .from('campaigns')
+  .select('*')
+  .eq('campaign_id', campaignId)
+  .single()
+
+// Status indicators:
+// 'pending' - 🔵 Blue (in progress)
+// 'success' - 🟢 Green (completed)
+// 'failed' - 🔴 Red (error)
+```
+
+## Verifying Sync
+
+Check if profiles were synced successfully:
+
+```typescript
+// Query Airtable to verify
+const airtable = require('airtable')
+const base = new airtable({ apiKey: AIRTABLE_API_KEY }).base(baseId)
+
+const records = await base('Table 1')
+  .select({
+    filterByFormula: `{Assigned Date} = '${campaignDate}'`
+  })
+  .all()
+
+console.log(`Table 1 has ${records.length} profiles`) // Expected: 180
+```
+
+## Retry Logic
+
+The endpoint implements automatic retry on transient failures:
+
+```typescript
+// Pseudo-code for retry logic
+const syncTableWithRetry = async (
+  tableName: string,
+  profiles: Profile[],
+  maxRetries = 3
+) => {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await syncTable(tableName, profiles)
+      return { success: true }
+    } catch (error) {
+      if (error.statusCode === 429) {
+        // Rate limit - exponential backoff
+        await delay(1000 * Math.pow(2, attempt))
+        continue
+      }
+      throw error
+    }
+  }
+  throw new Error(`Failed after ${maxRetries} retries`)
+}
+```
+
+## Cleanup After Sync
+
+After successful sync, the campaign enters a 7-day lifecycle:
+
+1. VAs access profiles in Airtable
+2. VAs mark profiles as "In Progress" or "Completed"
+3. After 7 days, `/api/cleanup` endpoint removes old campaigns
+4. Profiles are marked as unused and returned to the pool
+
+## Related Endpoints
+
+<CardGroup cols={2}>
+  <Card title="Daily Selection" icon="calendar-days" href="/api/daily-selection">
+    Create campaign before syncing
+  </Card>
+  
+  <Card title="Distribute" icon="users" href="/api/distribute">
+    Distribute profiles before syncing
+  </Card>
+  
+  <Card title="Cleanup" icon="trash" href="/api/cleanup">
+    Clean up old campaigns after 7 days
+  </Card>
+  
+  <Card title="API Overview" icon="book" href="/api/overview">
+    View complete API documentation
+  </Card>
+</CardGroup>

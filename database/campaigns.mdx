@@ -1,0 +1,503 @@
+---
+title: 'campaigns Table'
+description: 'Campaign tracking and status management'
+icon: 'calendar'
+---
+
+## Overview
+
+The `campaigns` table tracks daily campaign creation and execution. Each campaign represents a batch of **14,400 profiles** distributed across **80 VAs** for outreach activities.
+
+<Info>
+Campaigns have a **7-day lifecycle** and are automatically cleaned up by the backend cleanup job.
+</Info>
+
+## Schema Definition
+
+```sql
+CREATE TABLE campaigns (
+  campaign_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  campaign_date DATE NOT NULL,
+  total_assigned INTEGER NOT NULL,
+  status TEXT CHECK (status IN ('pending', 'success', 'failed')),
+  base_id TEXT NOT NULL,  -- Multi-tenant isolation key
+  created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+## Column Reference
+
+<ResponseField name="campaign_id" type="UUID" required>
+  Primary key - Auto-generated unique identifier for the campaign
+  
+  ```typescript
+  campaign_id: string // UUID format
+  ```
+</ResponseField>
+
+<ResponseField name="campaign_date" type="DATE" required>
+  Date when the campaign was created
+  
+  ```typescript
+  campaign_date: string // YYYY-MM-DD format
+  ```
+  
+  <Note>
+  Used for lifecycle management and cleanup operations. Campaigns older than 7 days are automatically cleaned up.
+  </Note>
+</ResponseField>
+
+<ResponseField name="total_assigned" type="INTEGER" required>
+  Total number of profiles assigned in this campaign
+  
+  ```typescript
+  total_assigned: number // Expected: 14400
+  ```
+  
+  **Standard value:** 14,400 (180 profiles × 80 VAs)
+  
+  <Warning>
+  If less than 14,400, indicates insufficient available usernames were found.
+  </Warning>
+</ResponseField>
+
+<ResponseField name="status" type="TEXT" required>
+  Current status of the campaign
+  
+  ```typescript
+  type CampaignStatus = 'pending' | 'success' | 'failed'
+  status: CampaignStatus
+  ```
+  
+  **Status values:**
+  - `pending` - Campaign is being created/distributed (grey indicator)
+  - `success` - Campaign completed successfully (green indicator)
+  - `failed` - Campaign failed during creation/distribution (red indicator)
+</ResponseField>
+
+<ResponseField name="base_id" type="TEXT" required>
+  Multi-tenant isolation key - Links to scraping job's base_id
+  
+  ```typescript
+  base_id: string // e.g., "appXYZ123"
+  ```
+  
+  <Warning>
+  Critical for filtering campaigns by tenant. All campaign queries must include base_id filtering.
+  </Warning>
+</ResponseField>
+
+<ResponseField name="created_at" type="TIMESTAMP" default="NOW()">
+  Timestamp when the campaign was created
+  
+  ```typescript
+  created_at: string // ISO 8601 format
+  ```
+</ResponseField>
+
+## TypeScript Interface
+
+```typescript
+export interface Campaign {
+  campaign_id: string;
+  campaign_date: string; // YYYY-MM-DD
+  total_assigned: number;
+  status: 'pending' | 'success' | 'failed';
+  base_id: string;
+  created_at: string;
+}
+```
+
+## Indexes and Constraints
+
+```sql
+-- Primary key index
+CREATE INDEX idx_campaigns_pkey ON campaigns(campaign_id);
+
+-- Date filtering for cleanup
+CREATE INDEX idx_campaigns_date ON campaigns(campaign_date);
+
+-- Status filtering
+CREATE INDEX idx_campaigns_status ON campaigns(status);
+
+-- Multi-tenant isolation
+CREATE INDEX idx_campaigns_base_id ON campaigns(base_id);
+
+-- Composite index for lifecycle queries
+CREATE INDEX idx_campaigns_base_date ON campaigns(base_id, campaign_date);
+
+-- Status constraint
+ALTER TABLE campaigns
+  ADD CONSTRAINT campaigns_status_check
+  CHECK (status IN ('pending', 'success', 'failed'));
+
+-- Positive assignment count
+ALTER TABLE campaigns
+  ADD CONSTRAINT campaigns_total_assigned_check
+  CHECK (total_assigned > 0);
+```
+
+## Relationships
+
+### One-to-Many: Campaign → Assignments
+
+```typescript
+// One campaign has many daily assignments
+const { data: assignments } = await supabase
+  .from('daily_assignments')
+  .select('*')
+  .eq('campaign_id', campaignId)
+  .eq('base_id', baseId)
+```
+
+## Common Queries
+
+### Get All Campaigns
+
+```typescript
+import { supabase } from '@/lib/supabase'
+import { getActiveBaseId } from '@/lib/scraping-jobs'
+
+const baseId = await getActiveBaseId()
+const { data: campaigns, error } = await supabase
+  .from('campaigns')
+  .select('*')
+  .eq('base_id', baseId)
+  .order('created_at', { ascending: false })
+```
+
+### Create Campaign
+
+```typescript
+const { data: campaign, error } = await supabase
+  .from('campaigns')
+  .insert({
+    campaign_date: new Date().toISOString().split('T')[0],
+    total_assigned: 14400,
+    status: 'pending',
+    base_id: baseId
+  })
+  .select()
+  .single()
+```
+
+### Update Campaign Status
+
+```typescript
+const { error } = await supabase
+  .from('campaigns')
+  .update({ status: 'success' })
+  .eq('campaign_id', campaignId)
+  .eq('base_id', baseId) // Multi-tenant safety
+```
+
+### Get Recent Campaigns
+
+```typescript
+const { data: recentCampaigns } = await supabase
+  .from('campaigns')
+  .select('*')
+  .eq('base_id', baseId)
+  .order('created_at', { ascending: false })
+  .limit(10)
+```
+
+## Campaign Workflow
+
+### Complete Campaign Creation Flow
+
+```typescript
+/**
+ * POST /api/daily-selection
+ * Creates campaign and selects 14,400 profiles
+ */
+async function createDailySelection(baseId: string) {
+  // 1. Check available usernames
+  const { count } = await supabase
+    .from('global_usernames')
+    .select('*', { count: 'exact', head: true })
+    .eq('base_id', baseId)
+    .eq('used', false)
+  
+  if (count < 14400) {
+    throw new Error(`Insufficient usernames. Have ${count}, need 14400`)
+  }
+  
+  // 2. Create campaign
+  const { data: campaign, error: campaignError } = await supabase
+    .from('campaigns')
+    .insert({
+      campaign_date: new Date().toISOString().split('T')[0],
+      total_assigned: 14400,
+      status: 'pending',
+      base_id: baseId
+    })
+    .select()
+    .single()
+  
+  // 3. Select unused usernames
+  const { data: selectedUsernames } = await supabase
+    .from('global_usernames')
+    .select('*')
+    .eq('base_id', baseId)
+    .eq('used', false)
+    .limit(14400)
+  
+  // 4. Mark as used
+  const ids = selectedUsernames.map(u => u.id)
+  await supabase
+    .from('global_usernames')
+    .update({ used: true, used_at: new Date().toISOString() })
+    .in('id', ids)
+    .eq('base_id', baseId)
+  
+  return campaign
+}
+```
+
+### Distribution Workflow
+
+```typescript
+/**
+ * POST /api/distribute/{campaign_id}
+ * Distributes profiles to 80 VA tables
+ */
+async function distributeToVAs(campaignId: string, baseId: string) {
+  // Get campaign's selected usernames (marked as used)
+  const { data: usernames } = await supabase
+    .from('global_usernames')
+    .select('*')
+    .eq('base_id', baseId)
+    .eq('used', true)
+    .is('used_at', 'not.null')
+    .order('used_at', { ascending: false })
+    .limit(14400)
+  
+  // Distribute: 180 profiles per VA, 80 VAs
+  const assignments = []
+  const PROFILES_PER_VA = 180
+  const NUM_VAS = 80
+  
+  for (let vaNum = 1; vaNum <= NUM_VAS; vaNum++) {
+    const startIdx = (vaNum - 1) * PROFILES_PER_VA
+    const vaProfiles = usernames.slice(startIdx, startIdx + PROFILES_PER_VA)
+    
+    for (let i = 0; i < vaProfiles.length; i++) {
+      assignments.push({
+        campaign_id: campaignId,
+        id: vaProfiles[i].id,
+        username: vaProfiles[i].username,
+        full_name: vaProfiles[i].full_name,
+        va_table_number: vaNum,
+        position: i + 1,
+        job_id: vaProfiles[i].job_id,
+        base_id: baseId,
+        status: 'pending'
+      })
+    }
+  }
+  
+  // Insert assignments
+  await supabase.from('daily_assignments').insert(assignments)
+}
+```
+
+### Airtable Sync
+
+```typescript
+/**
+ * POST /api/airtable-sync/{campaign_id}
+ * Syncs profiles to Airtable VA tables
+ */
+async function syncToAirtable(campaignId: string, baseId: string) {
+  const { data: assignments } = await supabase
+    .from('daily_assignments')
+    .select('*')
+    .eq('campaign_id', campaignId)
+    .eq('base_id', baseId)
+    .order('va_table_number', { ascending: true })
+  
+  // Group by VA table
+  const vaGroups = {}
+  assignments.forEach(a => {
+    if (!vaGroups[a.va_table_number]) {
+      vaGroups[a.va_table_number] = []
+    }
+    vaGroups[a.va_table_number].push(a)
+  })
+  
+  // Sync each VA table to Airtable
+  for (const [vaNum, profiles] of Object.entries(vaGroups)) {
+    await syncVATableToAirtable(vaNum, profiles, baseId)
+  }
+  
+  // Update campaign status
+  await supabase
+    .from('campaigns')
+    .update({ status: 'success' })
+    .eq('campaign_id', campaignId)
+    .eq('base_id', baseId)
+}
+```
+
+## Status Indicators
+
+The UI displays color-coded status indicators:
+
+### Success (Green)
+
+```typescript
+if (campaign.status === 'success') {
+  return <Badge className="bg-green-500">Success</Badge>
+}
+```
+
+### Failed (Red)
+
+```typescript
+if (campaign.status === 'failed') {
+  return <Badge className="bg-red-500">Failed</Badge>
+}
+```
+
+### Pending (Grey)
+
+```typescript
+if (campaign.status === 'pending') {
+  return <Badge className="bg-gray-500">Pending</Badge>
+}
+```
+
+## Lifecycle Management
+
+### 7-Day Cleanup
+
+Campaigns older than 7 days are automatically cleaned up:
+
+```typescript
+/**
+ * POST /api/cleanup
+ * Runs daily at 2 AM via cron job
+ */
+async function cleanupOldCampaigns(baseId: string) {
+  const sevenDaysAgo = new Date()
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+  const cutoffDate = sevenDaysAgo.toISOString().split('T')[0]
+  
+  // Find campaigns to cleanup
+  const { data: oldCampaigns } = await supabase
+    .from('campaigns')
+    .select('campaign_id')
+    .eq('base_id', baseId)
+    .lt('campaign_date', cutoffDate)
+  
+  for (const campaign of oldCampaigns) {
+    // Get assigned usernames
+    const { data: assignments } = await supabase
+      .from('daily_assignments')
+      .select('id')
+      .eq('campaign_id', campaign.campaign_id)
+      .eq('base_id', baseId)
+    
+    const profileIds = assignments.map(a => a.id)
+    
+    // Reset 'used' flag (allow reuse after 7 days)
+    await supabase
+      .from('global_usernames')
+      .update({ used: false, used_at: null })
+      .in('id', profileIds)
+      .eq('base_id', baseId)
+    
+    // Delete assignments
+    await supabase
+      .from('daily_assignments')
+      .delete()
+      .eq('campaign_id', campaign.campaign_id)
+      .eq('base_id', baseId)
+    
+    // Delete campaign
+    await supabase
+      .from('campaigns')
+      .delete()
+      .eq('campaign_id', campaign.campaign_id)
+      .eq('base_id', baseId)
+  }
+  
+  return { campaigns_cleaned: oldCampaigns.length }
+}
+```
+
+### Cron Job Setup
+
+```bash
+# Run cleanup daily at 2 AM
+0 2 * * * curl -X POST http://localhost:5001/api/cleanup
+```
+
+## Error Handling
+
+### Insufficient Usernames
+
+```typescript
+if (availableCount < 14400) {
+  await supabase
+    .from('campaigns')
+    .update({ status: 'failed' })
+    .eq('campaign_id', campaignId)
+  
+  throw new Error(`Only ${availableCount} usernames available, need 14400`)
+}
+```
+
+### Distribution Failure
+
+```typescript
+try {
+  await distributeToVAs(campaignId, baseId)
+  await supabase
+    .from('campaigns')
+    .update({ status: 'success' })
+    .eq('campaign_id', campaignId)
+} catch (error) {
+  await supabase
+    .from('campaigns')
+    .update({ status: 'failed' })
+    .eq('campaign_id', campaignId)
+  
+  throw error
+}
+```
+
+## Best Practices
+
+<Check>**Verify username availability before creating campaign** - Check that at least 14,400 unused usernames exist</Check>
+
+<Check>**Update status atomically** - Use transactions when updating campaign status and related records</Check>
+
+<Check>**Handle partial failures gracefully** - Mark campaign as failed if any step fails, allow retry</Check>
+
+<Warning>**Always include base_id in queries** - Critical for multi-tenant data isolation</Warning>
+
+<Warning>**Don't delete campaigns manually** - Let the cleanup job handle lifecycle management</Warning>
+
+## Sample Data
+
+```sql
+INSERT INTO campaigns (campaign_date, total_assigned, status, base_id) VALUES
+  ('2025-10-23', 14400, 'success', 'appXYZ123'),
+  ('2025-10-22', 14400, 'success', 'appXYZ123'),
+  ('2025-10-21', 14400, 'failed', 'appXYZ123'),
+  ('2025-10-20', 14400, 'success', 'appXYZ123');
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Daily Assignments" icon="list-check" href="/database/daily-assignments">
+    See how profiles are distributed to VAs
+  </Card>
+  
+  <Card title="Campaign Workflow" icon="arrows-rotate" href="/features/campaign-management">
+    Learn the complete campaign creation process
+  </Card>
+</CardGroup>

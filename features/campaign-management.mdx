@@ -1,0 +1,501 @@
+---
+title: Campaign Management
+description: Create and track daily campaigns with automated profile selection, VA distribution, and Airtable synchronization
+icon: calendar-days
+---
+
+## Overview
+
+Campaigns represent daily batches of profiles distributed to virtual assistants (VAs). The campaign system automatically selects unused profiles, distributes them across VA tables, and syncs to Airtable—all in one streamlined workflow.
+
+<CardGroup cols={2}>
+  <Card title="Automated Selection" icon="wand-magic-sparkles">
+    Intelligently selects unused profiles from the global username pool
+  </Card>
+  <Card title="Configurable Distribution" icon="sliders">
+    Customize profiles per VA (default 180) or use fixed distribution
+  </Card>
+  <Card title="Progress Tracking" icon="chart-line">
+    Real-time progress indicators for each workflow phase
+  </Card>
+  <Card title="Airtable Integration" icon="cloud">
+    Automatic synchronization to 80 VA tables in Airtable
+  </Card>
+</CardGroup>
+
+## Campaign Workflow
+
+### Three-Phase Process
+
+Every campaign creation follows a sequential three-phase workflow:
+
+<Steps>
+  <Step title="Phase 1: Campaign Creation (0-33%)">
+    Creates campaign record and selects unused profiles from `global_usernames` table
+    
+    **API Endpoint:** `POST /api/daily-selection`
+    
+    ```typescript
+    // Request
+    await apiPost('/api/daily-selection', baseId, {
+      profiles_per_table: 180  // Optional, defaults to env var
+    });
+    
+    // Response
+    {
+      success: true,
+      campaign_id: "uuid-here",
+      total_selected: 14400,
+      campaign_date: "2025-10-06"
+    }
+    ```
+    
+    Source: `components/payments-table.tsx:115-132`
+  </Step>
+  
+  <Step title="Phase 2: VA Distribution (33-66%)">
+    Distributes selected profiles across 80 VA tables with position tracking
+    
+    **API Endpoint:** `POST /api/distribute/{campaign_id}`
+    
+    ```typescript
+    // Request
+    await apiPost(`/api/distribute/${campaignId}`, baseId, {
+      profiles_per_table: 180
+    });
+    
+    // Response
+    {
+      success: true,
+      campaign_id: "uuid-here",
+      va_tables: 80,
+      profiles_per_table: 180
+    }
+    ```
+    
+    Source: `components/payments-table.tsx:135-151`
+  </Step>
+  
+  <Step title="Phase 3: Airtable Sync (66-100%)">
+    Pushes distributed profiles to Airtable workspace for VA access
+    
+    **API Endpoint:** `POST /api/airtable-sync/{campaign_id}`
+    
+    ```typescript
+    // Request
+    await apiPost(`/api/airtable-sync/${campaignId}`, baseId);
+    
+    // Response
+    {
+      success: true,
+      campaign_id: "uuid-here",
+      tables_synced: 80,
+      total_records: 14400
+    }
+    ```
+    
+    Source: `components/payments-table.tsx:154-167`
+  </Step>
+</Steps>
+
+## Campaign Creation UI
+
+### PaymentsTable Component
+
+The primary interface for viewing scraped accounts and creating campaigns:
+
+```typescript
+export function PaymentsTable({ 
+  accounts = [],           // Scraped accounts to display
+  totalFiltered = 0,       // Total count of filtered accounts
+  isLoading = false,       // Loading state
+  onCampaignComplete,      // Callback after successful campaign
+  canAssignToVAs = false,  // Permission flag
+  statusMessage = ""       // Status display message
+}: PaymentsTableProps)
+```
+
+Source: `components/payments-table.tsx:37-51`
+
+### Assignment Options
+
+Two methods available via dropdown menu:
+
+<CardGroup cols={2}>
+  <Card title="Fixed Assignment (180 per VA)" icon="lock">
+    Assigns exactly 180 profiles to each of 80 VAs (total: 14,400 profiles)
+    
+    - Validates available profiles before proceeding
+    - Requires minimum 14,400 unused usernames
+    - Opens confirmation dialog with availability check
+    
+    Source: `components/payments-table.tsx:193-248`
+  </Card>
+  
+  <Card title="Custom Assignment" icon="pen">
+    Allows custom profiles per VA configuration
+    
+    - Opens dialog to specify custom count
+    - Defaults to `NEXT_PUBLIC_PROFILES_PER_TABLE` env var
+    - Calculates total dynamically (count × 80 VAs)
+    
+    Source: `components/payments-table.tsx:251-271`
+  </Card>
+</CardGroup>
+
+### Progress Indicator
+
+Real-time progress display during campaign workflow:
+
+```typescript
+{progressStep !== 'idle' && (
+  <div className="space-y-2 mb-6">
+    <div className="flex items-center justify-between text-sm">
+      <span className="text-muted-foreground">
+        {progressStep === 'creating' && '📋 Creating campaign and selecting profiles...'}
+        {progressStep === 'distributing' && '🎲 Distributing to VA tables...'}
+        {progressStep === 'syncing' && '☁️ Syncing to Airtable...'}
+        {progressStep === 'complete' && '✅ Complete!'}
+      </span>
+      <span className="font-medium">{progress}%</span>
+    </div>
+    <Progress value={progress} className="h-2" />
+  </div>
+)}
+```
+
+Source: `components/payments-table.tsx:326-339`
+
+## Campaign Data Structure
+
+### Database Schema
+
+```sql
+CREATE TABLE campaigns (
+  campaign_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  campaign_date DATE NOT NULL,
+  total_assigned INTEGER NOT NULL,
+  status BOOLEAN,  -- true = success, false = failed
+  base_id TEXT NOT NULL,  -- Multi-tenant isolation
+  created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+Source: README.md:322-329
+
+### Campaign Interface
+
+```typescript
+interface Campaign {
+  campaign_id: string;
+  campaign_date: string;
+  total_assigned: number;
+  status: boolean;  // true = success, false = failed
+  created_at: string;
+}
+```
+
+Source: `components/campaigns-table.tsx:11-17`
+
+## Campaign History
+
+### CampaignsTable Component
+
+Displays all campaigns with color-coded status indicators:
+
+```typescript
+const getStatusDot = (status: boolean) => {
+  // true = success (green), false = failed (red)
+  const statusColor = status ? "bg-green-500" : "bg-red-500";
+  const statusText = status ? "success" : "failed";
+  
+  return (
+    <div className="flex items-center gap-2">
+      <div className={`h-2 w-2 rounded-full ${statusColor}`} />
+      <span className="capitalize">{statusText}</span>
+    </div>
+  );
+}
+```
+
+Source: `components/campaigns-table.tsx:85-96`
+
+### Status Indicators
+
+<CardGroup cols={2}>
+  <Card title="Success" icon="circle-check" color="#16a34a">
+    🟢 **Green Dot** - Campaign completed successfully
+    
+    All three phases completed without errors:
+    - Profile selection successful
+    - VA distribution completed
+    - Airtable sync finished
+  </Card>
+  
+  <Card title="Failed" icon="circle-xmark" color="#ef4444">
+    🔴 **Red Dot** - Campaign encountered errors
+    
+    One or more phases failed:
+    - Insufficient profiles available
+    - Distribution errors
+    - Airtable API rate limits exceeded
+  </Card>
+</CardGroup>
+
+### Campaign Filtering by Job
+
+Campaigns are automatically filtered by active job's `base_id`:
+
+```typescript
+useEffect(() => {
+  if (!isLoadingBase && baseId) {
+    fetchCampaigns();
+  }
+}, [baseId, isLoadingBase]);
+
+const fetchCampaigns = async () => {
+  const supabaseWithContext = createSupabaseClientWithContext(baseId);
+  
+  const { data, error } = await supabaseWithContext
+    .from('campaigns')
+    .select('campaign_id, campaign_date, total_assigned, status, created_at')
+    .eq('base_id', baseId)  // Filter by active job's base_id
+    .order('campaign_date', { ascending: false });
+  
+  setCampaigns(data || []);
+}
+```
+
+Source: `components/campaigns-table.tsx:33-83`
+
+## Assignment Progress Context
+
+### Global State Management
+
+Campaign progress is managed globally using React Context:
+
+```typescript
+interface AssignmentProgressContext {
+  isAssigning: boolean;
+  progress: number;
+  progressStep: 'idle' | 'creating' | 'distributing' | 'syncing' | 'complete';
+  profilesPerTable: number | null;
+  
+  startAssignment: () => void;
+  updateProgress: (progress: number, step: ProgressStep) => void;
+  completeAssignment: (profilesPerTable: number) => void;
+  failAssignment: () => void;
+}
+```
+
+Source: Referenced in `components/payments-table.tsx:62-71`
+
+### Using the Context
+
+```typescript
+import { useAssignmentProgress } from '@/contexts/assignment-progress-context';
+
+function CampaignComponent() {
+  const { 
+    isAssigning, 
+    progress, 
+    progressStep, 
+    startAssignment, 
+    updateProgress, 
+    completeAssignment 
+  } = useAssignmentProgress();
+  
+  const handleAssign = async () => {
+    startAssignment();
+    
+    // Phase 1: Creating (0-33%)
+    updateProgress(10, 'creating');
+    const result = await apiPost('/api/daily-selection', baseId);
+    updateProgress(33, 'creating');
+    
+    // Phase 2: Distributing (33-66%)
+    updateProgress(40, 'distributing');
+    await apiPost(`/api/distribute/${campaignId}`, baseId);
+    updateProgress(66, 'distributing');
+    
+    // Phase 3: Syncing (66-100%)
+    updateProgress(75, 'syncing');
+    await apiPost(`/api/airtable-sync/${campaignId}`, baseId);
+    
+    completeAssignment(180);
+  };
+}
+```
+
+Source: `components/payments-table.tsx:108-176`
+
+## Profile Selection Logic
+
+### Unused Username Selection
+
+The backend selects profiles marked as `used = false`:
+
+```sql
+-- Query executed by /api/daily-selection
+SELECT id, username, full_name
+FROM global_usernames
+WHERE base_id = ? 
+  AND used = false
+ORDER BY created_at DESC
+LIMIT ?  -- profiles_per_table × 80
+```
+
+### Marking Profiles as Used
+
+Once selected, profiles are marked to prevent duplicate assignments:
+
+```sql
+-- Update query in /api/daily-selection
+UPDATE global_usernames
+SET used = true, used_at = NOW()
+WHERE id IN (selected_profile_ids)
+  AND base_id = ?;
+```
+
+## Error Handling
+
+### Insufficient Profiles
+
+```typescript
+const { count: available } = await supabase
+  .from('global_usernames')
+  .select('*', { count: 'exact', head: true })
+  .eq('base_id', baseId)
+  .eq('used', false);
+
+const required = 14400;  // 180 × 80 VAs
+
+if (available < required) {
+  toast({
+    title: "Not enough profiles",
+    description: "Please scrape more profiles before attempting to distribute.",
+    variant: "destructive"
+  });
+  return;
+}
+```
+
+Source: `components/payments-table.tsx:211-234`
+
+### Phase Failure Recovery
+
+```typescript
+if (!selectionResult.success) {
+  toast({
+    title: "Campaign creation failed",
+    description: selectionResult.error || 'Could not create campaign',
+    variant: "destructive"
+  });
+  failAssignment();  // Reset progress state
+  return;
+}
+```
+
+Source: `components/payments-table.tsx:121-128`
+
+## Configuration
+
+### Environment Variables
+
+```bash
+# Default profiles per VA table
+NEXT_PUBLIC_PROFILES_PER_TABLE=180
+
+# Daily selection target (total profiles)
+NEXT_PUBLIC_DAILY_SELECTION_TARGET=14400
+```
+
+Source: README.md:495-497
+
+### Calculating Total Profiles
+
+```typescript
+// Default: 180 profiles × 80 VAs = 14,400 total
+const profilesPerTable = Number(process.env.NEXT_PUBLIC_PROFILES_PER_TABLE) || 180;
+const numVAs = 80;
+const totalRequired = profilesPerTable * numVAs;
+```
+
+Source: `components/payments-table.tsx:77`
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Verify profile availability before campaigns">
+    Always check `availableUsernames` count before creating campaigns:
+    
+    ```typescript
+    const stats = await getJobStatisticsByBaseId(baseId);
+    
+    if (stats.availableUsernames < 14400) {
+      // Show warning, prevent campaign creation
+      return;
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Monitor progress with global context">
+    Use `useAssignmentProgress()` to track campaign state across components:
+    
+    ```typescript
+    const { isAssigning, progress } = useAssignmentProgress();
+    
+    // Disable UI during assignment
+    <Button disabled={isAssigning}>Create Campaign</Button>
+    ```
+  </Accordion>
+  
+  <Accordion title="Handle all three phases sequentially">
+    Never skip phases or run in parallel—each phase depends on the previous:
+    
+    ```typescript
+    // ✅ Correct: Sequential execution
+    const campaign = await createCampaign();
+    const distributed = await distribute(campaign.id);
+    const synced = await syncToAirtable(campaign.id);
+    
+    // ❌ Wrong: Parallel execution will fail
+    await Promise.all([
+      createCampaign(),
+      distribute(),  // Missing campaign_id!
+      syncToAirtable()  // Missing campaign_id!
+    ]);
+    ```
+  </Accordion>
+  
+  <Accordion title="Reset state when switching jobs">
+    Clear campaign data when `baseId` changes:
+    
+    ```typescript
+    useResetOnChange(baseId, () => {
+      setCampaigns([]);
+      setIsLoading(true);
+      setError(null);
+    }, { skipInitial: true });
+    ```
+    
+    Source: `components/campaigns-table.tsx:26-31`
+  </Accordion>
+</AccordionGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Scraping Jobs" icon="briefcase" href="/features/scraping-jobs">
+    Learn about multi-tenant job management
+  </Card>
+  <Card title="VA Distribution" icon="users" href="/features/va-distribution">
+    Understand profile distribution to VAs
+  </Card>
+  <Card title="Airtable Sync" icon="cloud" href="/features/airtable-sync">
+    Explore Airtable integration details
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/daily-selection">
+    Complete API documentation for campaigns
+  </Card>
+</CardGroup>
